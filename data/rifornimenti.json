@@ -1,0 +1,643 @@
+[
+  {
+    "nome": "Energia Terra/Aria 3",
+    "categoria": "energia",
+    "tipo": "ENERGIA_TERRA",
+    "tipi": [
+      "ENERGIA_TERRA",
+      "ENERGIA_ARIA"
+    ],
+    "valore": 3,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Aria/Fuoco 3",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ARIA",
+    "tipi": [
+      "ENERGIA_ARIA",
+      "ENERGIA_FUOCO"
+    ],
+    "valore": 3,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Fuoco/Acqua 3",
+    "categoria": "energia",
+    "tipo": "ENERGIA_FUOCO",
+    "tipi": [
+      "ENERGIA_FUOCO",
+      "ENERGIA_ACQUA"
+    ],
+    "valore": 3,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Acqua/Terra 3",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ACQUA",
+    "tipi": [
+      "ENERGIA_ACQUA",
+      "ENERGIA_TERRA"
+    ],
+    "valore": 3,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Terra/Fuoco 3",
+    "categoria": "energia",
+    "tipo": "ENERGIA_TERRA",
+    "tipi": [
+      "ENERGIA_TERRA",
+      "ENERGIA_FUOCO"
+    ],
+    "valore": 3,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Aria/Acqua 3",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ARIA",
+    "tipi": [
+      "ENERGIA_ARIA",
+      "ENERGIA_ACQUA"
+    ],
+    "valore": 3,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Terra/Aria 4",
+    "categoria": "energia",
+    "tipo": "ENERGIA_TERRA",
+    "tipi": [
+      "ENERGIA_TERRA",
+      "ENERGIA_ARIA"
+    ],
+    "valore": 4,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Aria/Fuoco 4",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ARIA",
+    "tipi": [
+      "ENERGIA_ARIA",
+      "ENERGIA_FUOCO"
+    ],
+    "valore": 4,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Fuoco/Acqua 4",
+    "categoria": "energia",
+    "tipo": "ENERGIA_FUOCO",
+    "tipi": [
+      "ENERGIA_FUOCO",
+      "ENERGIA_ACQUA"
+    ],
+    "valore": 4,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Acqua/Terra 4",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ACQUA",
+    "tipi": [
+      "ENERGIA_ACQUA",
+      "ENERGIA_TERRA"
+    ],
+    "valore": 4,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Terra/Fuoco 4",
+    "categoria": "energia",
+    "tipo": "ENERGIA_TERRA",
+    "tipi": [
+      "ENERGIA_TERRA",
+      "ENERGIA_FUOCO"
+    ],
+    "valore": 4,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Aria/Acqua 4",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ARIA",
+    "tipi": [
+      "ENERGIA_ARIA",
+      "ENERGIA_ACQUA"
+    ],
+    "valore": 4,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Etere 3",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 3,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Etere 3 (2)",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 3,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Etere 4",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 4,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Terra 5",
+    "categoria": "energia",
+    "tipo": "ENERGIA_TERRA",
+    "valore": 5,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Aria 5",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ARIA",
+    "valore": 5,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Fuoco 5",
+    "categoria": "energia",
+    "tipo": "ENERGIA_FUOCO",
+    "valore": 5,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Acqua 5",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ACQUA",
+    "valore": 5,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Etere 5",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 5,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Terra 5 (2)",
+    "categoria": "energia",
+    "tipo": "ENERGIA_TERRA",
+    "valore": 5,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Aria 5 (2)",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ARIA",
+    "valore": 5,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Fuoco 5 (2)",
+    "categoria": "energia",
+    "tipo": "ENERGIA_FUOCO",
+    "valore": 5,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Acqua 5 (2)",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ACQUA",
+    "valore": 5,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Etere 5 (2)",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 5,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Terra 6",
+    "categoria": "energia",
+    "tipo": "ENERGIA_TERRA",
+    "valore": 6,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Aria 6",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ARIA",
+    "valore": 6,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Fuoco 6",
+    "categoria": "energia",
+    "tipo": "ENERGIA_FUOCO",
+    "valore": 6,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Acqua 6",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ACQUA",
+    "valore": 6,
+    "quantita": 1
+  },
+  {
+    "nome": "Energia Etere 6",
+    "categoria": "energia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 6,
+    "quantita": 1
+  },
+  {
+    "nome": "Patto",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Scambia la tua mano con quella di un altro magista."
+  },
+  {
+    "nome": "Proselitismo",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Paga il costo di un demone avversario per rubarlo e aggiungerlo alla tua cerchia."
+  },
+  {
+    "nome": "Pranayama",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Rivela le prime 3 carte Rifornimento: tienine 2 e dai la terza al magista con meno carte."
+  },
+    {
+    "nome": "Trasmutazione",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Scambia un tuo demone con uno nel Limbo dello stesso livello."
+  },
+  {
+    "nome": "Richiamo",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "evoca un demone dal cimetero (paga il suo costo)."
+  },
+  {
+    "nome": "Rabdomanzia",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Recupera dagli scarti la carta con il valore più alto."
+  },
+  {
+    "nome": "Abracadabra",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Scambia un tuo demone con uno avversario dello stesso livello."
+  },
+  {
+    "nome": "Roba d'Altri",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruba 1 carta a caso dalla mano di un avversario. Se è una magia, rubane un'altra."
+  },
+  {
+    "nome": "Illuminazione",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Replica l'effetto azione di un demone in gioco (umano: a scelta; bot: il più potente)."
+  },
+  {
+    "nome": "Bibidibodibibu",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ETERE",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Sposta il demone avversario con più stelle nel Limbo."
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_TERRA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di 1 posizione in senso antiorario.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          -1
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ARIA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di 1 posizione in senso antiorario.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          -1
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_FUOCO",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di 1 posizione in senso orario.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          1
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ACQUA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di 1 posizione in senso orario.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          1
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_TERRA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di 1 posizione.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          -1,
+          1
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ARIA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di 1 posizione.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          -1,
+          1
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_FUOCO",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di 1 posizione.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          -1,
+          1
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ACQUA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di 1 posizione.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          -1,
+          1
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_TERRA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di 2 posizioni in senso antiorario.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          -2
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ARIA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di 2 posizioni in senso orario.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          2
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_FUOCO",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di 2 posizioni.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          -2,
+          2
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ACQUA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di 2 posizioni.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          -2,
+          2
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_TERRA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di 2 posizioni.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          -2,
+          2
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ARIA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di un massimo di 2 posizioni in senso antiorario.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          -2,
+          -1
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_FUOCO",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di un massimo di 2 posizioni in senso orario.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          1,
+          2
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ACQUA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di un massimo di 2 posizioni.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          -2,
+          -1,
+          1,
+          2
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Spostastelle",
+    "categoria": "magia",
+    "tipo": "ENERGIA_TERRA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Ruota il boss di un massimo di 2 posizioni.",
+    "azione_boss": {
+      "rotazione": {
+        "opzioni": [
+          -2,
+          -1,
+          1,
+          2
+        ]
+      }
+    }
+  },
+  {
+    "nome": "Stoppastella",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ARIA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Annulla l'effetto di qualsiasi Spostastelle",
+    "azione_boss": {
+      "annulla": true
+    }
+  },
+  {
+    "nome": "Stoppastella",
+    "categoria": "magia",
+    "tipo": "ENERGIA_FUOCO",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Annulla l'effetto di qualsiasi Spostastelle",
+    "azione_boss": {
+      "annulla": true
+    }
+  },
+  {
+    "nome": "Stoppastella",
+    "categoria": "magia",
+    "tipo": "ENERGIA_ACQUA",
+    "valore": 2,
+    "quantita": 1,
+    "descrizione": "Annulla l'effetto di qualsiasi Spostastelle",
+    "azione_boss": {
+      "annulla": true
+    }
+  }
+]

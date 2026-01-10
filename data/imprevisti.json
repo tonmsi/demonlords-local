@@ -1,0 +1,50 @@
+﻿[
+    {
+        "descrizione":  "Questo turno paghi 1 risorsa in piu per evocare. Poi pesca una nuova carta Evocazione.",
+        "nome":  "Giorno di Festa"
+    },
+    {
+        "descrizione":  "Perdi la possibilita di evocare questo turno.",
+        "nome":  "Lezione Morale Non Richiesta"
+    },
+    {
+        "descrizione":  "Il tuo turno termina immediatamente.",
+        "nome":  "Scomunica"
+    },
+    {
+        "descrizione":  "Manda un demone al cimitero, poi pesca una nuova carta Evocazione.",
+        "nome":  "Santa Inquisizione"
+    },
+    {
+        "descrizione":  "Dai una carta a un altro magista.",
+        "nome":  "Buon Samaritano"
+    },
+    {
+        "descrizione":  "Scegli un tuo demone e mandalo nel Limbo.",
+        "nome":  "L\u0027Esorcista"
+    },
+    {
+        "descrizione":  "Non succede nulla.",
+        "nome":  "Balbettio"
+    },
+    {
+        "descrizione":  "Esegui immediatamente un tentativo di conquista del boss.",
+        "nome":  "Deus Ex Machina"
+    },
+    {
+        "descrizione":  "Scegli un demone nel Cimitero e trattalo come appena rivelato.",
+        "nome":  "Videocall Nostalgica"
+    },
+    {
+        "descrizione":  "Esegui subito un tentativo di conquista del boss; gli altri non possono usare Spostastelle.",
+        "nome":  "Colpo di Fulmine"
+    },
+    {
+        "descrizione":  "Sacrifica un tuo demone e pesca carte pari al suo livello.",
+        "nome":  "Culto dell\u0027Agnello"
+    },
+    {
+        "descrizione":  "Recupera una carta a tua scelta dagli scarti.",
+        "nome":  "Novo Ordine Mentale"
+    }
+]
