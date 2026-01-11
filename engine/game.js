@@ -118,9 +118,7 @@ export class Gioco {
   pescaEvocazione(giocatore) {
     const carta = this.mazzo_evocazioni.pesca();
     if (!carta) return null;
-    if (carta instanceof Demone) {
-      this.limbo.push(carta);
-    } else if (carta instanceof Imprevisto) {
+    if (carta instanceof Imprevisto) {
       // TODO: gestire effetti imprevisti; per ora la scartiamo in pila scarti
       this.scarti.push(carta);
     }
@@ -165,6 +163,33 @@ export class Gioco {
     return base + (giocatore?.costo_extra_evocazione ?? 0);
   }
 
+  requestAction(tipo = "generica") {
+    if (this.fase !== "turno") {
+      return { ok: false, motivo: "fase_non_valida" };
+    }
+    if (!this.canAct()) {
+      return { ok: false, motivo: "azioni_finite" };
+    }
+    if (this.current_action) {
+      return { ok: false, motivo: "azione_in_corso" };
+    }
+    this.current_action = tipo;
+    this.fase = "azione";
+    this._emit("azione_iniziata", { tipo, azione_corrente: this.azione_corrente });
+    return { ok: true };
+  }
+
+  completeAction(consuma = true) {
+    const tipo = this.current_action || "generica";
+    this.current_action = null;
+    this.fase = "turno";
+    if (consuma) {
+      this.registraAzione(tipo);
+    } else {
+      this._emit("azione_annullata", { tipo });
+    }
+  }
+
   evocaDaLimbo(index, giocatore) {
     const demone = this.limbo[index];
     if (!demone) return { ok: false, motivo: "Nessun demone" };
@@ -195,7 +220,9 @@ export class Gioco {
   }
 
   mandaNelLimbo(demone) {
-    this.limbo.push(demone);
+    if (!this.limbo.includes(demone)) {
+      this.limbo.push(demone);
+    }
   }
 
   scartaCarte(carte) {

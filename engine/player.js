@@ -92,22 +92,33 @@ export class Giocatore {
    * Semplice greedy: soddisfa prima il requisito di tipo, poi somma per valore.
    */
   trovaPagamento(costoRichiesto, costoTipo = null, costoTipoMinimo = 0) {
-    const energie = this.mano.filter(c => c?.categoria === "energia");
+    const valoreCarta = (c) => {
+      if (!c) return 0;
+      if (typeof c.valore === "number") return c.valore;
+      if ((c?.categoria || "").toLowerCase() === "magia") return 2; // magie/spostastelle valgono 2
+      return 0;
+    };
+
+    const energie = this.mano.filter(c => {
+      const cat = (c?.categoria || "").toLowerCase();
+      return cat === "energia" || cat === "magia";
+    });
     if (!energie.length) return [];
 
-    const byValue = [...energie].sort((a, b) => (b?.valore ?? 0) - (a?.valore ?? 0));
+    const byValue = [...energie].sort((a, b) => valoreCarta(b) - valoreCarta(a));
     const pagamento = [];
     let totale = 0;
-    let contatoreTipo = 0;
+    let valoreTipo = 0;
 
-    // Prima soddisfa il requisito di tipo specifico
+    // Prima soddisfa il requisito di tipo specifico (per valore, non per numero di carte)
     if (costoTipo) {
       for (const c of byValue) {
-        if (contatoreTipo >= costoTipoMinimo) break;
+        if (valoreTipo >= costoTipoMinimo) break;
         if (c?.tipi?.includes?.(costoTipo) || c?.tipo === costoTipo) {
           pagamento.push(c);
-          totale += c?.valore ?? 0;
-          contatoreTipo += 1;
+          const val = valoreCarta(c);
+          totale += val;
+          valoreTipo += val;
         }
       }
     }
@@ -117,13 +128,13 @@ export class Giocatore {
       if (pagamento.includes(c)) continue;
       if (totale >= costoRichiesto) break;
       pagamento.push(c);
-      totale += c?.valore ?? 0;
+      totale += valoreCarta(c);
     }
 
     if (totale < costoRichiesto) {
       return [];
     }
-    if (costoTipo && contatoreTipo < costoTipoMinimo) {
+    if (costoTipo && valoreTipo < costoTipoMinimo) {
       return [];
     }
     return pagamento;

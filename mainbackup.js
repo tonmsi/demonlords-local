@@ -1105,13 +1105,6 @@ function getTextureForCard(cartaModel, tipo) {
   return tipo === "rifornimento" ? "dorso_rifornimenti" : "demon_fuoco";
 }
 
-function getCardValue(carta) {
-  if (!carta) return 0;
-  if (typeof carta.valore === "number") return carta.valore;
-  if ((carta?.categoria || "").toLowerCase() === "magia") return 2;
-  return 0;
-}
-
 function resolveEnergyTextureKey(carta) {
   const mapSingle = {
     ENERGIA_ARIA: "a",
@@ -1167,10 +1160,7 @@ async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
 
     const reqTipo = demone?.costo_tipo || null;
     const reqMin = demone?.costo_tipo_minimo || 0;
-    const energie = (giocatore?.mano || []).filter(c => {
-      const cat = (c?.categoria || "").toLowerCase();
-      return cat === "energia" || cat === "magia";
-    });
+    const energie = (giocatore?.mano || []).filter(c => c?.categoria === "energia");
     const suggerite = giocatore.trovaPagamento(costoEffettivo, reqTipo, reqMin) || [];
 
     const depth = 100;
@@ -1240,7 +1230,7 @@ async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
         strokeThickness: 3,
       }).setOrigin(0.5).setDepth(depth + 3);
 
-      const valText = scene.add.text(cx, cy + 53, `${getCardValue(model)}`, {
+      const valText = scene.add.text(cx, cy + 53, `${model.valore}`, {
         font: "16px Arial", fill: "#fff"
       }).setOrigin(0.5).setDepth(depth + 3);
 
@@ -1308,7 +1298,7 @@ async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
 
     // === FUNZIONI INTERNE ===
     const computeStatus = () => {
-      const total = Array.from(selected).reduce((sum, m) => sum + getCardValue(m), 0);
+      const total = Array.from(selected).reduce((sum, m) => sum + (m?.valore || 0), 0);
       const tipoVal = reqTipo
         ? Array.from(selected).filter(m => (m?.tipi || []).includes(reqTipo) || m?.tipo === reqTipo)
             .reduce((sum, m) => sum + (m?.valore || 0), 0)
@@ -1551,22 +1541,7 @@ function syncHumanHand(scene) {
 function syncLimboSprites(scene) {
   if (!gioco) return;
   const desired = gioco.limbo || [];
-
-  // Pulisci sprite non attivi e rimuovi duplicati mantenendo la prima occorrenza
-  const seen = new Set();
-  const cleaned = [];
-  limboSprites.forEach(s => {
-    if (!s?.active || !s._model) return;
-    if (seen.has(s._model)) {
-      try { s._overlay?.destroy(); } catch (_) {}
-      try { s.destroy(); } catch (_) {}
-      return;
-    }
-    seen.add(s._model);
-    cleaned.push(s);
-  });
-
-  const pool = [...cleaned];
+  const pool = limboSprites.filter(s => s?.active);
   const newSprites = [];
 
   desired.forEach((model) => {
@@ -1644,9 +1619,8 @@ function syncBotCerchiaSprites(scene) {
 }
 
 function placeInLimbo(scene, cartaModel) {
-  // Se esiste giA  uno sprite per questa carta, riallinea e basta
-  const existing = limboSprites.find(s => s._model === cartaModel);
-  if (existing) {
+  // evita duplicati visivi
+  if (limboSprites.find(s => s._model === cartaModel)) {
     layoutLimboSprites(scene);
     return;
   }
@@ -1656,10 +1630,29 @@ function placeInLimbo(scene, cartaModel) {
   addCardOverlay(scene, card, cartaModel);
   attachTooltip(card, () => demoneTooltipText(cartaModel), { growDown: true });
   card._tooltipAttached = true;
-  const idx = gioco?.limbo?.indexOf?.(cartaModel);
-  const insertAt = idx != null && idx >= 0 ? idx : limboSprites.length;
-  limboSprites.splice(insertAt, 0, card);
-  layoutLimboSprites(scene);
+  const idx = gioco?.limbo?.indexOf?.(cartaModel) ?? limboSprites.length;
+  const slot = (scene.limboSlots && scene.limboSlots[idx]) || { x: 300 + idx * 70, y: 65 };
+  scene.tweens.add({
+    targets: card,
+    x: slot.x,
+    y: slot.y,
+    duration: 700,
+    ease: "Cubic.easeOut",
+    onComplete: () => {
+      limboSprites.splice(idx, 0, card);
+      layoutLimboSprites(scene);
+    },
+  });
+
+  if (card._overlay) {
+    scene.tweens.add({
+      targets: card._overlay,
+      x: slot.x,
+      y: slot.y - (card._overlayOffset || 45),
+      duration: 700,
+      ease: "Cubic.easeOut",
+    });
+  }
 }
 
 function layoutLimboSprites(scene) {
@@ -1685,100 +1678,6 @@ function layoutLimboSprites(scene) {
   if (ui.limboCount) ui.limboCount.setText(String(gioco?.limbo?.length || 0));
 }
 
-async function openLimboSelectionDialog(scene) {
-  if (!gioco?.limbo?.length) return null;
-  const demoni = gioco.limbo.filter(d => d instanceof Demone);
-  if (!demoni.length) return null;
-
-  modalOpen = true;
-  return new Promise(resolve => {
-    const depth = 1050;
-    const overlay = scene.add.rectangle(675, 360, 1350, 720, 0x000000, 0.6)
-      .setDepth(depth)
-      .setInteractive();
-    const panel = scene.add.rectangle(675, 360, 880, 320, 0x1f1f1f, 0.95)
-      .setDepth(depth + 1)
-      .setStrokeStyle(2, 0x888888);
-    const title = scene.add.text(675, 210, "Scegli un demone dal Limbo", {
-      font: "22px Arial",
-      fill: "#fff"
-    }).setOrigin(0.5).setDepth(depth + 2);
-
-    let selected = demoni[0] || null;
-    const cards = [];
-    const startX = 330;
-    const startY = 300;
-    const spacingX = 110;
-    const spacingY = 150;
-    const perRow = 5;
-
-    const updateSelection = () => {
-      cards.forEach(c => {
-        const active = c.model === selected;
-        c.frame.setStrokeStyle(active ? 3 : 1, active ? 0xFFD700 : 0x555555);
-        c.frame.setAlpha(active ? 1 : 0.6);
-      });
-    };
-
-    demoni.forEach((model, idx) => {
-      const col = idx % perRow;
-      const row = Math.floor(idx / perRow);
-      const cx = startX + col * spacingX;
-      const cy = startY + row * spacingY;
-
-      const frame = scene.add.rectangle(cx, cy, 90, 120, 0x444444, 0.7)
-        .setDepth(depth + 1)
-        .setStrokeStyle(1, 0x555555)
-        .setOrigin(0.5)
-        .setInteractive();
-      const tex = getTextureForCard(model, "demone");
-      const img = scene.add.image(cx, cy, tex)
-        .setScale(0.11)
-        .setDepth(depth + 2)
-        .setInteractive();
-      const name = scene.add.text(cx, cy + 70, truncateText(model.nome || "", 12), {
-        font: "12px Arial",
-        fill: "#ddd"
-      }).setOrigin(0.5).setDepth(depth + 2);
-
-      const pick = () => {
-        selected = model;
-        updateSelection();
-      };
-      frame.on("pointerdown", pick);
-      img.on("pointerdown", pick);
-
-      cards.push({ frame, img, name, model });
-    });
-
-    const confirmBtn = scene.add.text(600, 500, "Evoca", {
-      font: "18px Arial",
-      fill: "#fff",
-      backgroundColor: "#3a9c4f",
-      padding: { x: 12, y: 6 }
-    }).setDepth(depth + 2).setInteractive();
-    const cancelBtn = scene.add.text(760, 500, "Annulla", {
-      font: "18px Arial",
-      fill: "#fff",
-      backgroundColor: "#666",
-      padding: { x: 12, y: 6 }
-    }).setDepth(depth + 2).setInteractive();
-
-    const controls = [overlay, panel, title, confirmBtn, cancelBtn, ...cards.flatMap(c => [c.frame, c.img, c.name])];
-    const cleanup = (choice) => {
-      controls.forEach(o => { try { o.destroy(); } catch (_) {} });
-      modalOpen = false;
-      resolve(choice);
-    };
-
-    overlay.on("pointerdown", () => cleanup(null));
-    cancelBtn.on("pointerdown", () => cleanup(null));
-    confirmBtn.on("pointerdown", () => cleanup(selected));
-
-    updateSelection();
-  });
-}
-
 function evocaDalLimbo(scene) {
   if (!giocoPronto || !gioco) return;
   if (gioco.requestAction) {
@@ -1796,23 +1695,13 @@ function evocaDalLimbo(scene) {
     return;
   }
   const giocatore = gioco.giocatoreCorrente();
-  const demoniDisponibili = gioco.limbo.filter(d => d instanceof Demone);
-  if (!demoniDisponibili.length) {
+  const demone = gioco.limbo[0];
+  if (!demone) {
     showBotBalloon(scene, "Player", "Nessun demone disponibile", 625, 360);
-    if (gioco.completeAction) gioco.completeAction(false);
     return;
   }
-  const selectAndPay = async () => {
-    let demone = demoniDisponibili[0];
-    if (demoniDisponibili.length > 1) {
-      demone = await openLimboSelectionDialog(scene);
-      if (!demone) {
-        if (gioco.completeAction) gioco.completeAction(false);
-        return;
-      }
-    }
-    const costo = gioco.calcolaCostoEffettivo(giocatore, demone);
-    const scelta = await openPaymentDialog(scene, giocatore, demone, costo);
+  const costo = gioco.calcolaCostoEffettivo(giocatore, demone);
+  openPaymentDialog(scene, giocatore, demone, costo).then(scelta => {
     if (scelta && scelta.pagamentoValido && (costo === 0 || scelta.selezionate.length)) {
       const idxLimbo = gioco.limbo.indexOf(demone);
       if (idxLimbo >= 0) gioco.limbo.splice(idxLimbo, 1);
@@ -1825,18 +1714,15 @@ function evocaDalLimbo(scene) {
       removePaidFromHand(scene, scelta.selezionate);
       giocatore.cerchia.push(demone);
       addCerchiaSprite(scene, demone);
-      pushLog(`Player evoca ${demone.nome} dal Limbo`);
-      showBotBalloon(scene, "Player", `Evocato ${demone.nome} dal Limbo`, 625, 360);
       if (gioco.completeAction) gioco.completeAction(true);
       else gioco.registraAzione();
+      showBotBalloon(scene, "Player", `Evocato ${demone.nome} dal Limbo`, 625, 360);
     } else {
       showBotBalloon(scene, "Player", "Pagamento fallito", 625, 360);
       if (gioco.completeAction) gioco.completeAction(false);
     }
     refreshUI(scene);
-  };
-
-  selectAndPay().catch(err => {
+  }).catch(err => {
     console.error("Errore evocaDalLimbo:", err);
     modalOpen = false;
     if (gioco.completeAction) gioco.completeAction(false);

@@ -59,7 +59,8 @@ export async function buildEvocazioniDeck(
     loadJson(demoniUrl),
     loadJson(imprevistiUrl),
   ]);
-  const demoni = expandEntries(demoniCfg, Demone);
+  // Demoni: forziamo una sola copia per carta, ignorando eventuale "quantita" nel JSON
+  const demoni = demoniCfg.map(entry => new Demone(entry));
   const imprevisti = expandEntries(imprevistiCfg, Imprevisto);
   const carte = demoni.concat(imprevisti);
   const deck = new Mazzo(carte);
