@@ -90,6 +90,43 @@ export class Boss extends Carta {
     super(data);
     this.valori = data?.valori || {}; // requisiti per elemento
     this.livello_stella = data?.livello_stella ?? 0; // usato in probabilità conquista
+    this.rivelato = false;
+    // Gestione rotazione requisiti
+    const order = ["E", "W", "F", "T", "A"];
+    this._order = order;
+    this._baseValues = order.map(k => this.valori[k] ?? 0);
+    this._offset = 0;
+  }
+
+  requisitoPer(sigillo) {
+    if (!sigillo) return Infinity;
+    return this.valori?.[sigillo] ?? Infinity;
+  }
+
+  descrizioneRequisiti() {
+    const v = this.valori || {};
+    return `E:${v.E || 0} W:${v.W || 0} F:${v.F || 0} T:${v.T || 0} A:${v.A || 0}`;
+  }
+
+  ruota(passi = 0) {
+    if (!passi) return;
+    const len = this._order.length;
+    this._offset = (this._offset + passi) % len;
+    const rotated = {};
+    this._order.forEach((k, idx) => {
+      // similar to python: valori[(idx - offset) mod len]
+      rotated[k] = this._baseValues[(idx - this._offset + len) % len];
+    });
+    this.valori = rotated;
+  }
+
+  resetRotazione() {
+    this._offset = 0;
+    const rotated = {};
+    this._order.forEach((k, idx) => {
+      rotated[k] = this._baseValues[idx];
+    });
+    this.valori = rotated;
   }
 }
 

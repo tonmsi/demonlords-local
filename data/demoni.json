@@ -6,6 +6,7 @@
     "costo": 1,
     "effetto": "entrata: sposta nel limbo un demone di livello 1.",
   "quantita": 1,
+  "elemento": "T",
   "tipo_effetto": "entrata",
   "costo_tipo": "ENERGIA_TERRA",
   "costo_tipo_minimo": 1

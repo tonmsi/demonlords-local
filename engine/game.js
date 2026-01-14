@@ -136,22 +136,287 @@ export class Gioco {
 
   conquistaBoss(boss) {
     if (!boss) return false;
+    if (this.stoppastella_shield) {
+      this.stoppastella_shield = false;
+      this._log("conquista_boss_bloccata", "Tentativo bloccato da Stoppastella", {});
+      if (this.onAzione) this.onAzione(this.giocatoreCorrente().nome, "Conquista bloccata");
+      return false;
+    }
     const player = this.giocatoreCorrente();
-    const ok = player.decidiConquistaBoss(boss);
+    const sig = player?.sigillo;
+    let requisito = boss.requisitoPer ? boss.requisitoPer(sig) : Infinity;
+    const stelle = player?.totale_stelle ?? 0;
+
+    // Spostastelle attaccante: prova a ridurre il requisito se non sufficiente
+    const attSposta = this._findSpostastelle(player);
+    if (attSposta && stelle < requisito) {
+      const step = this._chooseRotationForAttacker(boss, sig, stelle, attSposta);
+      if (step !== null) {
+        boss.ruota(step);
+        requisito = boss.requisitoPer(sig);
+        this._consumeSpostastelle(player, attSposta, `Spostastelle attacco ${step}`);
+      }
+    }
+
+    // Ricalcola dopo eventuale rotazione
+    requisito = boss.requisitoPer(sig);
+    let ok = sig != null && stelle >= requisito;
+
+    // Spostastelle difensori: se l'attaccante ora conquista, prova a bloccarlo
+    if (ok) {
+      for (const opp of this.giocatori) {
+        if (opp === player) continue;
+        const card = this._findSpostastelle(opp);
+        if (!card) continue;
+        const step = this._chooseRotationForDefender(boss, sig, stelle, card);
+        if (step !== null) {
+          boss.ruota(step);
+          requisito = boss.requisitoPer(sig);
+          ok = stelle >= requisito;
+          this._consumeSpostastelle(opp, card, `Spostastelle difesa ${step} da ${opp.nome}`);
+          if (!ok) break;
+        }
+      }
+    }
+
+    this.tentativo_conquista_fatto = true;
     if (ok) {
       player.boss_conquistati.push(boss);
       this.boss_disponibili.shift();
-      this._log("conquista_boss", `${player.nome} conquista ${boss.nome}`, { giocatore: player.nome, boss: boss.nome });
+      this._log("conquista_boss", `${player.nome} conquista ${boss.nome}`, {
+        giocatore: player.nome,
+        boss: boss.nome,
+        requisito,
+        stelle,
+        sigillo: sig,
+      });
       if (this.onAzione) {
         this.onAzione(player.nome, "Conquista il boss!");
       }
       this._emit("azione", { giocatore: player.nome, azione: `Conquista ${boss.nome}` });
+    } else {
+      if (boss) boss.rivelato = true;
+      this._log("conquista_boss_fallita", `${player.nome} fallisce ${boss?.nome || "boss"}`, {
+        giocatore: player.nome,
+        boss: boss?.nome || null,
+        requisito,
+        stelle,
+        sigillo: sig,
+      });
+      if (this.onAzione) {
+        this.onAzione(player.nome, "Conquista fallita");
+      }
     }
-    if (!ok) {
-      this._log("conquista_boss_fallita", `${player.nome} fallisce ${boss?.nome || "boss"}`, { giocatore: player.nome, boss: boss?.nome || null });
-    }
-    this.tentativo_conquista_fatto = true;
     return ok;
+  }
+
+  giocaMagia(giocatore, carta) {
+    if (!giocatore || !carta) return { ok: false, motivo: "Parametri mancanti" };
+    if ((carta?.categoria || "").toLowerCase() !== "magia") return { ok: false, motivo: "Non è una magia" };
+    const idx = giocatore.mano.indexOf(carta);
+    if (idx === -1) return { ok: false, motivo: "Carta non in mano" };
+
+    // Rimuovi dalla mano e metti negli scarti
+    giocatore.mano.splice(idx, 1);
+    this.scarti.push(carta);
+
+    const nome = (carta.nome || "").toLowerCase();
+    const eff = this._risolviMagia(giocatore, carta, nome);
+
+    this._log("magia", `${giocatore.nome} gioca ${carta.nome}`, {
+      giocatore: giocatore.nome,
+      carta: carta.nome,
+      effetto: eff,
+    });
+    this._emit("azione", { giocatore: giocatore.nome, azione: `Gioca ${carta.nome}` });
+    if (this.onAzione) {
+      this.onAzione(giocatore.nome, `Gioca magia ${carta.nome}`);
+    }
+    return { ok: true, effetto: eff };
+  }
+
+  _risolviMagia(giocatore, carta, nome) {
+    const bots = this.giocatori.filter(g => g !== giocatore);
+    const firstOpponent = () => bots.find(b => b.mano.length || b.cerchia.length) || bots[0] || null;
+    const pickOpponentWithMostCards = () => bots.slice().sort((a,b)=>b.mano.length - a.mano.length)[0] || firstOpponent();
+    const pickOpponentWithStrongestDemon = () => {
+      return bots
+        .map(b => ({ b, d: (b.cerchia || []).slice().sort((x,y)=> (y?.livello_stella||0)-(x?.livello_stella||0))[0] }))
+        .filter(o => o.d)
+        .sort((a,b)=> (b.d?.livello_stella||0)-(a.d?.livello_stella||0))[0] || null;
+    };
+
+    switch (nome) {
+      case "patto": {
+        const opp = pickOpponentWithMostCards();
+        if (opp) {
+          const tmp = giocatore.mano;
+          giocatore.mano = opp.mano;
+          opp.mano = tmp;
+          return `Scambia mano con ${opp.nome}`;
+        }
+        return "Nessun avversario per scambiare";
+      }
+      case "roba d'altri": {
+        const opp = pickOpponentWithMostCards();
+        if (!opp || !opp.mano.length) return "Nessuna carta da rubare";
+        const stealOne = () => {
+          const c = opp.mano.splice(Math.floor(Math.random() * opp.mano.length), 1)[0];
+          if (c) giocatore.mano.push(c);
+          return c;
+        };
+        const c1 = stealOne();
+        if (c1 && (c1?.categoria || "").toLowerCase() === "magia" && opp.mano.length) {
+          stealOne();
+        }
+        return `Ruba carta da ${opp.nome}`;
+      }
+      case "bibidibodibibu": {
+        const opp = pickOpponentWithStrongestDemon();
+        if (!opp) return "Nessun demone avversario";
+        const dem = opp.d;
+        opp.b.cerchia.splice(opp.b.cerchia.indexOf(dem), 1);
+        this.mandaNelLimbo(dem);
+        return `Manda nel Limbo ${dem.nome} di ${opp.b.nome}`;
+      }
+      case "proselitismo": {
+        const target = pickOpponentWithStrongestDemon();
+        if (!target) return "Nessun demone avversario";
+        const dem = target.d;
+        const costo = this.calcolaCostoEffettivo(giocatore, dem);
+        const pagate = giocatore.pagaEvocazione(dem, costo);
+        if (!pagate) return "Pagamento fallito";
+        target.b.cerchia.splice(target.b.cerchia.indexOf(dem), 1);
+        this.scartaCarte(pagate);
+        giocatore.cerchia.push(dem);
+        return `Ruba ${dem.nome} pagando ${costo}`;
+      }
+      case "trasmutazione": {
+        const mio = (giocatore.cerchia || []).find(d => d instanceof Demone);
+        const limboDem = this.limbo.find(d => (d instanceof Demone) && mio && d.livello_stella === mio.livello_stella);
+        if (!mio || !limboDem) return "Nessun demone compatibile";
+        giocatore.cerchia.splice(giocatore.cerchia.indexOf(mio), 1);
+        this.limbo.splice(this.limbo.indexOf(limboDem), 1);
+        giocatore.cerchia.push(limboDem);
+        this.mandaNelLimbo(mio);
+        return `Scambia ${mio.nome} con ${limboDem.nome} nel Limbo`;
+      }
+      case "richiamo": {
+        const dem = [...this.cimitero].reverse().find(c => c instanceof Demone);
+        if (!dem) return "Nessun demone in cimitero";
+        const costo = this.calcolaCostoEffettivo(giocatore, dem);
+        const pagate = giocatore.pagaEvocazione(dem, costo);
+        if (!pagate) return "Pagamento fallito";
+        this.cimitero.splice(this.cimitero.lastIndexOf(dem), 1);
+        this.scartaCarte(pagate);
+        giocatore.cerchia.push(dem);
+        return `Evoca ${dem.nome} dal cimitero pagando ${costo}`;
+      }
+      case "rabdomanzia": {
+        const best = [...this.scarti].filter(c => c?.valore != null).sort((a,b)=> (b.valore||0)-(a.valore||0))[0];
+        if (!best) return "Nessuna carta negli scarti";
+        this.scarti.splice(this.scarti.lastIndexOf(best), 1);
+        giocatore.mano.push(best);
+        return `Recupera ${best.nome} dagli scarti`;
+      }
+      case "pranayama": {
+        const reveal = [];
+        for (let i=0; i<3; i+=1) {
+          const c = this.mazzo_rifornimenti.pesca();
+          if (c) reveal.push(c);
+        }
+        if (!reveal.length) return "Nessuna carta da rivelare";
+        reveal.sort((a,b)=> (b.valore||0)-(a.valore||0));
+        const keep = reveal.slice(0,2);
+        const give = reveal.slice(2);
+        giocatore.mano.push(...keep);
+        if (give.length) {
+          const other = this.giocatori.filter(g => g!==giocatore).sort((a,b)=> a.mano.length - b.mano.length)[0];
+          if (other) other.mano.push(...give);
+        }
+        return `Rivela ${reveal.length} rifornimenti, tiene 2`;
+      }
+      case "abracadabra": {
+        const myDem = (giocatore.cerchia || []).sort((a,b)=> (b.livello_stella||0)-(a.livello_stella||0))[0];
+        const target = pickOpponentWithStrongestDemon();
+        if (!myDem || !target) return "Nessun demone da scambiare";
+        const oppDem = target.d;
+        if (myDem.livello_stella !== oppDem.livello_stella) return "Nessun demone stesso livello";
+        giocatore.cerchia.splice(giocatore.cerchia.indexOf(myDem),1);
+        target.b.cerchia.splice(target.b.cerchia.indexOf(oppDem),1);
+        giocatore.cerchia.push(oppDem);
+        target.b.cerchia.push(myDem);
+        return `Scambia ${myDem.nome} con ${oppDem.nome}`;
+      }
+      case "illuminazione": {
+        return "Replica effetto demone (non implementato)";
+      }
+      default: {
+        if (carta.azione_boss && carta.azione_boss.rotazione) {
+          const boss = this.prossimoBoss();
+          const opts = carta.azione_boss.rotazione.opzioni || [];
+          if (boss && opts.length) {
+            const step = carta._rotationChoice != null ? carta._rotationChoice : opts[0];
+            boss.ruota(step);
+            return `Ruota boss di ${step}`;
+          }
+        }
+        if (carta.azione_boss && carta.azione_boss.annulla) {
+          this.stoppastella_shield = true;
+          return "Attiva Stoppastella: blocca il prossimo tentativo di conquista";
+        }
+        return "Effetto non implementato";
+      }
+    }
+  }
+
+  _findSpostastelle(giocatore) {
+    if (!giocatore?.mano) return null;
+    return giocatore.mano.find(c => c?.azione_boss?.rotazione);
+  }
+
+  _consumeSpostastelle(giocatore, carta, logMsg = "") {
+    const idx = giocatore.mano.indexOf(carta);
+    if (idx >= 0) giocatore.mano.splice(idx, 1);
+    this.scarti.push(carta);
+    if (logMsg) this._log("spostastelle", logMsg, { giocatore: giocatore.nome, carta: carta.nome });
+  }
+
+  _chooseRotationForAttacker(boss, sigillo, stelle, carta) {
+    const opts = carta?.azione_boss?.rotazione?.opzioni || [];
+    if (!opts.length || !boss) return null;
+    const reqCurrent = boss.requisitoPer(sigillo);
+    let best = null;
+    opts.forEach(step => {
+      const reqBefore = boss.requisitoPer(sigillo);
+      boss.ruota(step);
+      const newReq = boss.requisitoPer(sigillo);
+      boss.ruota(-step);
+      if (newReq <= stelle && newReq < reqBefore) {
+        if (best === null || newReq < best.newReq) {
+          best = { step, newReq };
+        }
+      }
+    });
+    return best ? best.step : null;
+  }
+
+  _chooseRotationForDefender(boss, sigilloAtt, stelleAtt, carta) {
+    const opts = carta?.azione_boss?.rotazione?.opzioni || [];
+    if (!opts.length || !boss) return null;
+    const currentReq = boss.requisitoPer(sigilloAtt);
+    let chosen = null;
+    opts.forEach(step => {
+      boss.ruota(step);
+      const newReq = boss.requisitoPer(sigilloAtt);
+      boss.ruota(-step);
+      if (newReq > stelleAtt && newReq > currentReq) {
+        if (!chosen || newReq > chosen.newReq) {
+          chosen = { step, newReq };
+        }
+      }
+    });
+    return chosen ? chosen.step : null;
   }
 
   prossimoBoss() {

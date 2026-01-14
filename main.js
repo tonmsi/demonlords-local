@@ -21,6 +21,8 @@ let modalOpen = false;
 let demonDeck, resourceDeck, bossCard;
 let bossFrame = null;
 let bossFrame2 = null;
+let bossSealOverlays = [];
+let bossRingTexts = [];
 let pendingDemone = null;
 let gioco = null;
 let giocoPronto = false;
@@ -29,6 +31,8 @@ let settingsMenu = null;
 let logPanel = null;
 let actionLog = [];
 let spionePanel = null;
+const MAGIC_HOVER_COLOR = 0xFFD700;
+const SPOTASTELLE_MSG = "Vuoi usare uno Spostastelle?";
 
 function formatLogEntry(entry) {
   if (!entry) return "";
@@ -51,17 +55,17 @@ function pushLog(msgOrEntry) {
 
 // Posizioni bot per animazioni
 const botPositions = {
-  "Bot Beta": { mano: { x: 60, y: 155 }, cerchia: { x: 160, y: 250 } },
-  "Bot Gamma": { mano: { x: 60, y: 380 }, cerchia: { x: 160, y: 470 } },
-  "Bot Alpha": { mano: { x: 1140, y: 155 }, cerchia: { x: 1025, y: 250 } },
+  "Bot Beta": { mano: { x: 60, y: 155 }, cerchia: { x: 160, y: 250 } },   // top-left
+  "Bot Alpha": { mano: { x: 60, y: 380 }, cerchia: { x: 160, y: 470 } }, // bottom-left
+  "Bot Gamma": { mano: { x: 1140, y: 155 }, cerchia: { x: 1025, y: 250 } },
   "Bot Delta": { mano: { x: 1140, y: 380 }, cerchia: { x: 1025, y: 470 } },
 };
 
 // Traccia carte visibili nei bot e LIMBO
 const botCerchiaSprites = {
+  "Bot Alpha": [],
   "Bot Beta": [],
   "Bot Gamma": [],
-  "Bot Alpha": [],
   "Bot Delta": [],
 };
 
@@ -73,14 +77,30 @@ const ui = {
 };
 const BOT_ACTION_DELAY = 2000;
 const activeBalloons = new Set();
-const BOT_NAMES = ["Bot Beta", "Bot Gamma", "Bot Alpha", "Bot Delta"];
-const SIGILLI_POOL = ["A", "B", "C", "D", "E"];
+const BOT_NAMES = ["Bot Alpha", "Bot Beta", "Bot Gamma", "Bot Delta"];
+const SIGILLI_POOL = ["E", "W", "F", "T", "A"];
 const playerConfig = {
   totalPlayers: 5, // include il player umano
   humanEnabled: true,
   sigilliRandom: true,
   sigilliManual: {},
 };
+
+function sigilloColor(sig) {
+  switch ((sig || "").toUpperCase()) {
+    case "E": return "#8a2be2";     // viola
+    case "T": return "#b8860b";     // giallo scuro
+    case "F": return "#d73a3a";     // rosso
+    case "W": return "#1e90ff";     // blu
+    case "A": return "#5fa16a";     // verde desaturato
+    default: return "#ffffff";
+  }
+}
+
+function applySigilloColor(textObj, sig) {
+  if (!textObj) return;
+  textObj.setStyle({ fill: sigilloColor(sig) });
+}
 
 function preload() {
   // === Tavolo di gioco ===
@@ -118,6 +138,12 @@ function preload() {
   ["magia", "spostastelle", "stoppastella"].forEach(name => {
     this.load.image(name, `assets/cards/magic/${name}.png`);
   });
+
+  // === Overlays tipi ===
+  ["aria", "acqua", "terra", "fuoco", "etere"].forEach(tipo => {
+    this.load.image(`overlay_tipo_${tipo}`, `assets/overlays/tipo_${tipo}.png`);
+  });
+  this.load.image("overlay_livello", "assets/overlays/livello.png");
 
   // === Tavolo Extra ===
   ["cemetery_pile", "cemetry_empty", "discard_empty", "discard_pile", "limbo"].forEach(img => {
@@ -196,7 +222,17 @@ function create() {
   }
   
   ui.bossName = this.add.text(625, 430, "Boss: -", { font: "16px Arial", fill: "#fff" }).setOrigin(0.5);
-  ui.bossReq = this.add.text(625, 450, "", { font: "12px Arial", fill: "#aaa" }).setOrigin(0.5);
+  // requisiti boss per elemento, colorati
+  ui.bossReq = this.add.text(625, 450, "", { font: "12px Arial", fill: "#aaa" }).setOrigin(0.5).setVisible(false);
+  ui.bossReqTexts = [];
+  const reqKeys = ["E", "W", "F", "T", "A"];
+  reqKeys.forEach((k, i) => {
+    const tx = this.add.text(530 + i * 30, 450, `${k}: -`, {
+      font: "12px Arial",
+      fill: sigilloColor(k)
+    }).setOrigin(0.5);
+    ui.bossReqTexts.push({ key: k, text: tx });
+  });
   const conquerBtn = this.add.text(625, 230, "Tenta Conquista", {
     font: "14px Arial",
     fill: "#fff",
@@ -267,7 +303,7 @@ function create() {
     panelElems: betaElems,
   });
 
-  // Bot Gamma (sinistra basso)
+  // Bot Alpha (sinistra basso)
   const gammaElems = [];
   {
     const g = this.add.graphics();
@@ -278,7 +314,7 @@ function create() {
     g.lineStyle(2, 0xFFD700, 1);
     g.strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, r);
   }
-  gammaElems.push(this.add.text(120, 330, "Bot Gamma", botStyle));
+  gammaElems.push(this.add.text(120, 330, "Bot Alpha", botStyle));
   const gammaSig = this.add.text(120, 348, "Sigillo: -", botStyle); gammaElems.push(gammaSig);
   const gammaHandText = this.add.text(120, 366, "Mano: -", botStyle); gammaElems.push(gammaHandText);
   const gammaStars = this.add.text(120, 384, "Stelle: -", botStyle); gammaElems.push(gammaStars);
@@ -296,7 +332,7 @@ function create() {
     );
   }
   ui.bots.push({
-    nome: "Bot Gamma",
+    nome: "Bot Alpha",
     sigillo: gammaSig,
     mano: gammaHandText,
     stelle: gammaStars,
@@ -305,7 +341,7 @@ function create() {
     panelElems: gammaElems,
   });
 
-  // Bot Alpha (destra alto)
+  // Bot Gamma (destra alto) - ex Alpha
   const alphaElems = [];
   {
     const g = this.add.graphics();
@@ -316,7 +352,7 @@ function create() {
     g.lineStyle(2, 0xFFD700, 1);
     g.strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, r);
   }
-  alphaElems.push(this.add.text(980, 105, "Bot Alpha", botStyle));
+  alphaElems.push(this.add.text(980, 105, "Bot Gamma", botStyle));
   const alphaSig = this.add.text(980, 123, "Sigillo: -", botStyle); alphaElems.push(alphaSig);
   const alphaHandText = this.add.text(980, 141, "Mano: -", botStyle); alphaElems.push(alphaHandText);
   const alphaStars = this.add.text(980, 159, "Stelle: -", botStyle); alphaElems.push(alphaStars);
@@ -334,7 +370,7 @@ function create() {
     );
   }
   ui.bots.push({
-    nome: "Bot Alpha",
+    nome: "Bot Gamma",
     sigillo: alphaSig,
     mano: alphaHandText,
     stelle: alphaStars,
@@ -526,6 +562,13 @@ function toggleLogPanel(scene) {
   refreshLogPanel();
 }
 
+function closeLogPanel() {
+  if (logPanel && logPanel.container?.active) {
+    try { logPanel.container.destroy(true); } catch (_) {}
+  }
+  logPanel = null;
+}
+
 function refreshLogPanel() {
   if (!logPanel || !logPanel.container?.active) return;
   const textObj = logPanel.textObj;
@@ -609,6 +652,13 @@ function toggleSpionePanel(scene) {
 
   spionePanel = { container, textObj };
   refreshSpionePanel();
+}
+
+function closeSpionePanel() {
+  if (spionePanel && spionePanel.container?.active) {
+    try { spionePanel.container.destroy(true); } catch (_) {}
+  }
+  spionePanel = null;
 }
 
 function refreshSpionePanel() {
@@ -884,48 +934,82 @@ function closePlayerSettings(scene) {
 }
 
 function resetBoardState(scene) {
-  hand.forEach(s => { try { s.destroy(); } catch (_) {} });
-  limboSprites.forEach(s => { try { s.destroy(); } catch (_) {} });
-  cerchiaSprites.forEach(s => { try { s.destroy(); } catch (_) {} });
+  const destroySprite = (s) => {
+    try { s._overlay?.destroy(); } catch (_) {}
+    try { s._hoverRect?.destroy(); } catch (_) {}
+    try { s._valueOverlay?.destroy(); } catch (_) {}
+    try { s._elementOverlays?.forEach(icon => icon?.destroy()); } catch (_) {}
+    try { s._levelStars?.forEach(star => star?.destroy()); } catch (_) {}
+    try { s.destroy(); } catch (_) {}
+  };
+  hand.forEach(destroySprite);
+  limboSprites.forEach(destroySprite);
+  cerchiaSprites.forEach(destroySprite);
   hand = [];
   limboSprites = [];
   cerchiaSprites = [];
+  // Pulisci anche le cerchie dei bot
+  Object.keys(botCerchiaSprites || {}).forEach(name => {
+    const arr = botCerchiaSprites[name] || [];
+    arr.forEach(destroySprite);
+    botCerchiaSprites[name] = [];
+  });
   activeBalloons.forEach(b => { try { b.destroy(); } catch (_) {} });
   activeBalloons.clear();
   if (ui.limboCount) ui.limboCount.setText("0");
   ui.bots.forEach(b => {
     b.sigillo?.setText("Sigillo: -");
+    applySigilloColor(b.sigillo, null);
     b.mano?.setText("Mano: -");
     b.stelle?.setText("Stelle: -");
     b.boss?.setText("Boss: -");
     b.manoCount?.setText("-");
   });
-  if (ui.human.sigillo) ui.human.sigillo.setText("Sigillo: -");
+  if (ui.human.sigillo) { ui.human.sigillo.setText("Sigillo: -"); applySigilloColor(ui.human.sigillo, null); }
   if (ui.human.boss) ui.human.boss.setText("Boss: -");
   if (ui.human.stelle) ui.human.stelle.setText("Stelle: -");
 }
 
 function applySigilliConfig(g) {
   if (!g) return;
-  const pool = [...SIGILLI_POOL];
-  if (playerConfig.sigilliRandom) {
-    for (let i = pool.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
-    }
-  }
+  // Sigilli in ordine orario E-W-F-T-A (ruotati casualmente). Si cicla se >5.
+  const baseOrder = [...SIGILLI_POOL]; // ["E","W","F","T","A"]
   const manual = playerConfig.sigilliRandom ? {} : { ...playerConfig.sigilliManual };
+
+  if (!playerConfig.sigilliRandom) {
+    // Manuale: assegna se presente, altrimenti sequenza base
+    g.giocatori.forEach((plr, idx) => {
+      const expected = baseOrder[idx % baseOrder.length];
+      const val = manual[plr.nome];
+      plr.sigillo = val && baseOrder.includes(val) ? val : expected;
+    });
+    return;
+  }
+
+  // Random con ordine causale: Bot Alpha riceve un sigillo casuale; Player riceve quello precedente; gli altri seguono l'ordine orario successivo
+  const seatOrder = ["Bot Alpha", "Bot Beta", "Bot Gamma", "Bot Delta", "Player"];
+  const present = seatOrder.filter(name => g.giocatori.some(p => p.nome === name));
+  const offset = Math.floor(Math.random() * baseOrder.length);
+
+  present.forEach((name, idx) => {
+    const plr = g.giocatori.find(p => p.nome === name);
+    if (!plr) return;
+    let sig;
+    if (name === "Player") {
+      // Sigillo precedente rispetto a Bot Alpha
+      sig = baseOrder[(offset - 1 + baseOrder.length) % baseOrder.length];
+    } else {
+      // Bot Alpha parte da offset, gli altri seguono
+      sig = baseOrder[(offset + idx) % baseOrder.length];
+    }
+    plr.sigillo = sig;
+  });
+
+  // Eventuali altri giocatori (se presenti) seguono la sequenza dopo quelli in seatOrder
   g.giocatori.forEach(plr => {
-    let chosen = null;
-    const val = manual[plr.nome];
-    if (val && pool.includes(val)) {
-      chosen = val;
-      pool.splice(pool.indexOf(val), 1);
-    }
-    if (!chosen && pool.length) {
-      chosen = pool.shift();
-    }
-    plr.sigillo = chosen || null;
+    if (present.includes(plr.nome)) return;
+    const idx = present.length;
+    plr.sigillo = baseOrder[(offset + idx) % baseOrder.length];
   });
 }
 
@@ -935,6 +1019,8 @@ async function startNewGame(scene) {
     try { settingsMenu.destroy(true); } catch (_) {}
     settingsMenu = null;
   }
+  closeLogPanel();
+  closeSpionePanel();
   giocoPronto = false;
   modalOpen = false;
   resetBoardState(scene);
@@ -946,10 +1032,10 @@ async function startNewGame(scene) {
   ui.bots.forEach(b => setBotVisibility(b.nome, activeBotSet.has(b.nome)));
   const azioneCb = (nomeBotOGiocatore, azione) => {
     const posizioni = {
-      "Bot Beta": { x: 160, y: 80 },
-      "Bot Gamma": { x: 160, y: 350 },
-      "Bot Alpha": { x: 1025, y: 80 },
-      "Bot Delta": { x: 1025, y: 350 },
+      "Bot Beta": { x: 160, y: 80 },   // top-left
+      "Bot Alpha": { x: 160, y: 350 }, // bottom-left
+      "Bot Gamma": { x: 1025, y: 80 }, // top-right
+      "Bot Delta": { x: 1025, y: 350 },// bottom-right
       "Player": { x: 625, y: 600 }
     };
     const pos = posizioni[nomeBotOGiocatore] || { x: 625, y: 360 };
@@ -1197,6 +1283,25 @@ async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
       stroke: "#fff",
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(depth + 3);
+
+    // Aggiungi stelle livello al demone
+    const demonStars = [];
+    if (demone && demone.livello_stella > 0) {
+      const numStars = demone.livello_stella;
+      const starWidth = 10;
+      const starSpacing = 2;
+      const totalWidth = (numStars * starWidth) + ((numStars - 1) * starSpacing);
+      const startOffsetX = -totalWidth / 2;
+      for (let i = 0; i < numStars; i++) {
+        if (scene.textures.exists("overlay_livello")) {
+          const star = scene.add.image(285 + startOffsetX + (i * (starWidth + starSpacing)), 480, "overlay_livello")
+            .setScale(0.15)
+            .setDepth(depth + 3);
+          demonStars.push(star);
+        }
+      }
+    }
+
     const title = scene.add.text(180, 140, demone.nome, {
       font: "26px Arial", fill: "#fff"
     }).setDepth(depth + 2);
@@ -1302,7 +1407,7 @@ async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
 
     const controls = [
       overlay, panel, title, reqText, effettoText,
-      demSprite, demonOverlay, totalText, statusText,
+      demSprite, demonOverlay, ...demonStars, totalText, statusText,
       evocaBtn, limboBtn, closeX, ...cardEntries.flatMap(c => [c.bg, c.img, c.valText, c.overlay])
     ];
 
@@ -1402,13 +1507,107 @@ function addCardOverlay(scene, card, cartaModel, offset = 45) {
   // Lega l'overlay al movimento della carta
   card._overlay = overlay;
   card._overlayOffset = offset;
+  card.on("destroy", () => {
+    try { card._hoverRect?.destroy(); } catch (_) {}
+  });
+
+  // Aggiungi overlay del valore in basso a sinistra se presente
+  if (cartaModel.valore != null) {
+    const valueOverlay = scene.add.text(card.x, card.y, String(cartaModel.valore), {
+      font: "bold 14px Arial",
+      fill: "#fff",
+      backgroundColor: "transparent",
+      padding: { x: 2, y: 1 },
+      stroke: "#000",
+      strokeThickness: 4,
+    }).setOrigin(0.5);
+    valueOverlay.setDepth(card.depth + 1);
+    card._valueOverlay = valueOverlay;
+
+    // Aggiungi icone elemento a fianco del valore
+    const tipi = Array.isArray(cartaModel.tipi) ? [...new Set(cartaModel.tipi)] : [];
+    if (!tipi.length && cartaModel.tipo) tipi.push(cartaModel.tipo);
+    
+    const elementMap = {
+      "ENERGIA_ARIA": "aria",
+      "ENERGIA_ACQUA": "acqua",
+      "ENERGIA_TERRA": "terra",
+      "ENERGIA_FUOCO": "fuoco",
+      "ENERGIA_ETERE": "etere"
+    };
+
+    card._elementOverlays = [];
+    tipi.forEach((tipo, idx) => {
+      const elementKey = elementMap[tipo];
+      if (elementKey && scene.textures.exists(`overlay_tipo_${elementKey}`)) {
+        const elementIcon = scene.add.image(card.x, card.y, `overlay_tipo_${elementKey}`).setScale(0.15);
+        elementIcon.setDepth(card.depth + 1);
+        card._elementOverlays.push(elementIcon);
+      }
+    });
+  }
+
+  // Aggiungi stelle livello per demoni
+  if (cartaModel && (cartaModel.tipo === "Demone" || cartaModel instanceof Demone) && cartaModel.livello_stella > 0) {
+    card._levelStars = [];
+    const numStars = cartaModel.livello_stella;
+    for (let i = 0; i < numStars; i++) {
+      if (scene.textures.exists("overlay_livello")) {
+        const star = scene.add.image(card.x, card.y, "overlay_livello").setScale(0.12);
+        star.setDepth(card.depth + 1);
+        card._levelStars.push(star);
+      }
+    }
+  }
+
   return overlay;
 }
 
 function syncOverlayPosition(sprite) {
   if (!sprite || !sprite._overlay || !sprite._overlay.active) return;
   const off = sprite._overlayOffset || 45;
-  sprite._overlay.setPosition(sprite.x, sprite.y - off);
+  const extraOffset = sprite._isHumanCerchia ? 20 : 0;  // +20px for human cerchia
+  sprite._overlay.setPosition(sprite.x, sprite.y - off - extraOffset);
+}
+
+function syncValueOverlayPosition(sprite) {
+  if (!sprite || !sprite._valueOverlay || !sprite._valueOverlay.active) return;
+  const cardBounds = sprite.getBounds();
+  const offsetX = -cardBounds.width / 2 + 18;
+  const offsetY = cardBounds.height / 2 - 21;
+  sprite._valueOverlay.setPosition(sprite.x + offsetX, sprite.y + offsetY);
+}
+
+function syncElementOverlaysPosition(sprite) {
+  if (!sprite || !sprite._elementOverlays || !sprite._elementOverlays.length) return;
+  const cardBounds = sprite.getBounds();
+  const baseOffsetX = -cardBounds.width / 2 + 33;
+  const offsetY = cardBounds.height / 2 - 21;
+  const spacing = 15;
+  
+  sprite._elementOverlays.forEach((icon, idx) => {
+    if (icon && icon.active) {
+      icon.setPosition(sprite.x + baseOffsetX + (idx * spacing), sprite.y + offsetY);
+    }
+  });
+}
+
+function syncLevelStarsPosition(sprite) {
+  if (!sprite || !sprite._levelStars || !sprite._levelStars.length) return;
+  const cardBounds = sprite.getBounds();
+  const totalStars = sprite._levelStars.length;
+  const starWidth = 10; // Approximate width at scale 0.12
+  const spacing = 2;
+  const totalWidth = (totalStars * starWidth) + ((totalStars - 1) * spacing);
+  const startOffsetX = -totalWidth / 2;
+  const extraOffset = sprite._isHumanCerchia ? 20 : 0;  // +20px for human cerchia
+  const offsetY = cardBounds.height / 2 - 21 - extraOffset;
+  
+  sprite._levelStars.forEach((star, idx) => {
+    if (star && star.active) {
+      star.setPosition(sprite.x + startOffsetX + (idx * (starWidth + spacing)), sprite.y + offsetY);
+    }
+  });
 }
 
 function attachTooltip(sprite, getText, opts = {}) {
@@ -1468,6 +1667,183 @@ function magiaTooltipText(c) {
   return `${c.nome || "Magia"}\nTipo: ${tipo}\nValore: ${valore}\nEffetto: ${effetto}`;
 }
 
+function playMagicCard(scene, card) {
+  if (!giocoPronto || !gioco || !card?._model) return;
+  const model = card._model;
+  if ((model?.categoria || "").toLowerCase() !== "magia") return;
+  const giocatore = gioco.giocatoreCorrente();
+  if (!giocatore || giocatore.nome !== "Player") {
+    showBotBalloon(scene, "Sistema", "Non è il tuo turno", 625, 600);
+    return;
+  }
+  if (!giocatore.mano.includes(model)) {
+    showBotBalloon(scene, "Sistema", "Carta non in mano", 625, 600);
+    return;
+  }
+  if (gioco.requestAction) {
+    const req = gioco.requestAction("gioca_magia");
+    if (!req.ok) {
+      showBotBalloon(scene, "Sistema", "Niente azioni rimaste", 625, 600);
+      return;
+    }
+  } else if (!gioco.puoAgire()) {
+    showBotBalloon(scene, "Sistema", "Niente azioni rimaste", 625, 600);
+    return;
+  }
+
+  const conferma = window.confirm(`Vuoi attivare ${model.nome}?`);
+  if (!conferma) {
+    if (gioco.completeAction) gioco.completeAction(false);
+    return;
+  }
+
+  // Gestisci scelta rotazione per spostastelle se ci sono più opzioni
+  if (model?.azione_boss?.rotazione?.opzioni && model.azione_boss.rotazione.opzioni.length > 1) {
+    const opts = model.azione_boss.rotazione.opzioni;
+    const choiceStr = window.prompt(`Scegli rotazione boss (${opts.join(", ")}):`, String(opts[0]));
+    const choiceNum = Number(choiceStr);
+    if (opts.includes(choiceNum)) {
+      model._rotationChoice = choiceNum;
+    }
+  }
+
+  const res = gioco.giocaMagia(giocatore, model);
+  delete model._rotationChoice;
+  if (res?.ok) {
+    removePaidFromHand(scene, [model]);
+    showBotBalloon(scene, "Player", `Gioca ${model.nome}`, 625, 600);
+    if (gioco.completeAction) gioco.completeAction(true);
+    else gioco.registraAzione();
+  } else {
+    showBotBalloon(scene, "Sistema", res?.motivo || "Magia non giocabile", 625, 600);
+    if (gioco.completeAction) gioco.completeAction(false);
+  }
+  refreshUI(scene);
+}
+
+function askYesNo(scene, message) {
+  return new Promise(resolve => {
+    const depth = 6000;
+    const overlay = scene.add.rectangle(625, 360, 1250, 720, 0x000000, 0.35)
+      .setDepth(depth).setInteractive();
+    const panel = scene.add.rectangle(625, 360, 420, 180, 0x222222, 0.95)
+      .setDepth(depth + 1).setStrokeStyle(2, 0x888888);
+    const text = scene.add.text(625, 320, message, {
+      font: "18px Arial",
+      fill: "#fff",
+      wordWrap: { width: 360, useAdvancedWrap: true },
+      align: "center"
+    }).setOrigin(0.5).setDepth(depth + 2);
+    const yesBtn = scene.add.text(565, 390, "Sì", {
+      font: "18px Arial",
+      fill: "#fff",
+      backgroundColor: "#3a9c4f",
+      padding: { x: 12, y: 6 }
+    }).setDepth(depth + 2).setInteractive({ useHandCursor: true });
+    const noBtn = scene.add.text(685, 390, "No", {
+      font: "18px Arial",
+      fill: "#fff",
+      backgroundColor: "#666",
+      padding: { x: 12, y: 6 }
+    }).setDepth(depth + 2).setInteractive({ useHandCursor: true });
+
+    const cleanup = (val) => {
+      [overlay, panel, text, yesBtn, noBtn].forEach(o => { try { o.destroy(); } catch (_) {} });
+      resolve(val);
+    };
+
+    overlay.on("pointerdown", () => cleanup(false));
+    yesBtn.on("pointerdown", () => cleanup(true));
+    noBtn.on("pointerdown", () => cleanup(false));
+  });
+}
+
+async function maybeUseHumanSpostastelle(scene, modo = "difesa") {
+  if (!gioco || !giocoPronto) return;
+  const player = gioco.giocatori.find(p => p.nome === "Player");
+  if (!player) return;
+  const boss = gioco.prossimoBoss?.();
+  const attacker = gioco.giocatoreCorrente?.();
+  if (!boss || !attacker) return;
+  const sposte = (player.mano || []).filter(c => c?.azione_boss?.rotazione);
+  if (!sposte.length) return;
+  const choice = await openSpostaDialog(scene, boss, attacker, sposte, modo);
+  if (!choice) return;
+  const { card, step } = choice;
+  if (step != null) card._rotationChoice = step;
+  const res = gioco.giocaMagia(player, card);
+  delete card._rotationChoice;
+  if (res?.ok) {
+    removePaidFromHand(scene, [card]);
+    refreshUI(scene);
+  }
+}
+
+function simulateReqAfterRotation(boss, sigillo, step) {
+  if (!boss || !sigillo) return { before: 0, after: 0 };
+  const before = boss.requisitoPer(sigillo);
+  boss.ruota(step);
+  const after = boss.requisitoPer(sigillo);
+  boss.ruota(-step);
+  return { before, after };
+}
+
+function openSpostaDialog(scene, boss, attacker, carte, modo) {
+  return new Promise(resolve => {
+    modalOpen = true;
+    const depth = 6000;
+    const overlay = scene.add.rectangle(625, 360, 1250, 720, 0x000000, 0.4).setDepth(depth).setInteractive();
+    const panel = scene.add.rectangle(625, 360, 520, 360, 0x1e1e1e, 0.95).setStrokeStyle(2, 0x888888).setDepth(depth + 1);
+    const title = scene.add.text(625, 210, "Vuoi usare uno Spostastelle?", {
+      font: "20px Arial",
+      fill: "#fff"
+    }).setOrigin(0.5).setDepth(depth + 2);
+    const info = scene.add.text(625, 240, `Attaccante: ${attacker?.nome || "-"} (${attacker?.sigillo || "-"}) Stelle: ${attacker?.totale_stelle ?? "-"}`, {
+      font: "14px Arial",
+      fill: "#ccc"
+    }).setOrigin(0.5).setDepth(depth + 2);
+
+    const list = [];
+    const startY = 270;
+    const lineH = 48;
+    carte.forEach((card, idx) => {
+      const opts = card?.azione_boss?.rotazione?.opzioni || [];
+      opts.forEach((step, jdx) => {
+        const { before, after } = simulateReqAfterRotation(boss, attacker?.sigillo, step);
+        const y = startY + (idx * 2 + jdx) * lineH * 0.6;
+        const row = scene.add.rectangle(625, y, 480, 40, 0xffffff, 0.05)
+          .setDepth(depth + 1)
+          .setStrokeStyle(1, 0x666666)
+          .setInteractive({ useHandCursor: true });
+        const txt = scene.add.text(320, y, `${card.nome} | rotazione ${step} | Req ${before} -> ${after}`, {
+          font: "14px Arial",
+          fill: "#fff"
+        }).setDepth(depth + 2).setOrigin(0, 0.5);
+        row.on("pointerover", () => row.setFillStyle(0xffffff, 0.15));
+        row.on("pointerout", () => row.setFillStyle(0xffffff, 0.05));
+        row.on("pointerdown", () => cleanup({ card, step }));
+        list.push(row, txt);
+      });
+    });
+
+    const closeBtn = scene.add.text(800, 200, "✖", {
+      font: "18px Arial",
+      fill: "#ffaaaa",
+      backgroundColor: "#800",
+      padding: { x: 8, y: 4 }
+    }).setDepth(depth + 2).setInteractive({ useHandCursor: true });
+
+    const controls = [overlay, panel, title, info, closeBtn, ...list];
+    const cleanup = (val) => {
+      controls.forEach(o => { try { o.destroy(); } catch (_) {} });
+      modalOpen = false;
+      resolve(val);
+    };
+    overlay.on("pointerdown", () => cleanup(null));
+    closeBtn.on("pointerdown", () => cleanup(null));
+  });
+}
+
 function addCardToHand(scene, cartaModel, options = {}) {
   const { silent = false } = options;
   const xStart = 450;
@@ -1504,6 +1880,73 @@ function addCardToHand(scene, cartaModel, options = {}) {
       ease: "Cubic.easeOut",
     });
   }
+
+  if (card._valueOverlay) {
+    syncValueOverlayPosition(card);
+    const cardBounds = card.getBounds();
+    const valOffsetX = -cardBounds.width / 2 + 18;
+    const valOffsetY = cardBounds.height / 2 - 21;
+    scene.tweens.add({
+      targets: card._valueOverlay,
+      x: targetX + valOffsetX,
+      y: targetY + valOffsetY,
+      duration: 700,
+      ease: "Cubic.easeOut",
+    });
+  }
+
+  if (card._elementOverlays && card._elementOverlays.length) {
+    syncElementOverlaysPosition(card);
+    const cardBounds = card.getBounds();
+    const baseOffsetX = -cardBounds.width / 2 + 33;
+    const valOffsetY = cardBounds.height / 2 - 21;
+    const spacing = 15;
+    
+    card._elementOverlays.forEach((icon, idx) => {
+      if (icon && icon.active) {
+        scene.tweens.add({
+          targets: icon,
+          x: targetX + baseOffsetX + (idx * spacing),
+          y: targetY + valOffsetY,
+          duration: 700,
+          ease: "Cubic.easeOut",
+        });
+      }
+    });
+  }
+
+  // Interattività per magie: evidenziazione hover e click per attivare
+  if ((cartaModel?.categoria || "").toLowerCase() === "magia") {
+    card.setInteractive({ useHandCursor: true });
+    const rect = scene.add.rectangle(card.x, card.y, card.displayWidth + 8, card.displayHeight + 8, 0xffffff, 0)
+      .setDepth(card.depth + 0.5)
+      .setStrokeStyle(2, MAGIC_HOVER_COLOR, 0);
+    rect.setVisible(false);
+    card._hoverRect = rect;
+
+    const updateRect = () => {
+      rect.setPosition(card.x, card.y);
+      rect.setDepth(card.depth + 0.5);
+    };
+    scene.events.on("update", updateRect);
+
+    card.on("pointerover", () => {
+      rect.setVisible(true);
+      rect.setStrokeStyle(2, MAGIC_HOVER_COLOR, 1);
+    });
+    card.on("pointerout", () => {
+      rect.setStrokeStyle(2, MAGIC_HOVER_COLOR, 0);
+      rect.setVisible(false);
+    });
+    card.on("pointerdown", () => {
+      playMagicCard(scene, card);
+    });
+
+    card.on("destroy", () => {
+      scene.events.off("update", updateRect);
+      try { rect.destroy(); } catch (_) {}
+    });
+  }
 }
 
 function layoutHand(scene) {
@@ -1518,6 +1961,38 @@ function layoutHand(scene) {
       duration: 450,
       ease: "Cubic.easeOut",
     });
+
+    if (sprite._valueOverlay && sprite._valueOverlay.active) {
+      const cardBounds = sprite.getBounds();
+      const valOffsetX = -cardBounds.width / 2 + 18;
+      const valOffsetY = cardBounds.height / 2 - 21;
+      scene.tweens.add({
+        targets: sprite._valueOverlay,
+        x: targetX + valOffsetX,
+        y: targetY + valOffsetY,
+        duration: 450,
+        ease: "Cubic.easeOut",
+      });
+    }
+
+    if (sprite._elementOverlays && sprite._elementOverlays.length) {
+      const cardBounds = sprite.getBounds();
+      const baseOffsetX = -cardBounds.width / 2 + 33;
+      const valOffsetY = cardBounds.height / 2 - 21;
+      const spacing = 15;
+      
+      sprite._elementOverlays.forEach((icon, idx) => {
+        if (icon && icon.active) {
+          scene.tweens.add({
+            targets: icon,
+            x: targetX + baseOffsetX + (idx * spacing),
+            y: targetY + valOffsetY,
+            duration: 450,
+            ease: "Cubic.easeOut",
+          });
+        }
+      });
+    }
   });
 }
 
@@ -1530,6 +2005,9 @@ function syncHumanHand(scene) {
   hand = hand.filter(sprite => {
     if (!player.mano.includes(sprite._model)) {
       if (sprite._overlay) sprite._overlay.destroy();
+      if (sprite._valueOverlay) sprite._valueOverlay.destroy();
+      if (sprite._elementOverlays) sprite._elementOverlays.forEach(icon => icon?.destroy());
+      if (sprite._levelStars) sprite._levelStars.forEach(star => star?.destroy());
       sprite.destroy();
       return false;
     }
@@ -1559,6 +2037,9 @@ function syncLimboSprites(scene) {
     if (!s?.active || !s._model) return;
     if (seen.has(s._model)) {
       try { s._overlay?.destroy(); } catch (_) {}
+      try { s._valueOverlay?.destroy(); } catch (_) {}
+      try { s._elementOverlays?.forEach(icon => icon?.destroy()); } catch (_) {}
+      try { s._levelStars?.forEach(star => star?.destroy()); } catch (_) {}
       try { s.destroy(); } catch (_) {}
       return;
     }
@@ -1588,6 +2069,9 @@ function syncLimboSprites(scene) {
   // distruggi sprite non più necessari
   pool.forEach(sprite => {
     try { sprite._overlay?.destroy(); } catch (_) {}
+    try { sprite._valueOverlay?.destroy(); } catch (_) {}
+    try { sprite._elementOverlays?.forEach(icon => icon?.destroy()); } catch (_) {}
+    try { sprite._levelStars?.forEach(star => star?.destroy()); } catch (_) {}
     try { sprite.destroy(); } catch (_) {}
   });
 
@@ -1679,6 +2163,7 @@ function layoutLimboSprites(scene) {
       ease: "Cubic.easeOut",
       onUpdate: () => {
         syncOverlayPosition(sprite);
+        syncLevelStarsPosition(sprite);
       },
     });
   });
@@ -1741,6 +2226,24 @@ async function openLimboSelectionDialog(scene) {
         fill: "#ddd"
       }).setOrigin(0.5).setDepth(depth + 2);
 
+      // Aggiungi stelle livello
+      const stars = [];
+      if (model && model.livello_stella > 0) {
+        const numStars = model.livello_stella;
+        const starWidth = 10;
+        const starSpacing = 2;
+        const totalWidth = (numStars * starWidth) + ((numStars - 1) * starSpacing);
+        const startOffsetX = -totalWidth / 2;
+        for (let i = 0; i < numStars; i++) {
+          if (scene.textures.exists("overlay_livello")) {
+            const star = scene.add.image(cx + startOffsetX + (i * (starWidth + starSpacing)), cy + 50, "overlay_livello")
+              .setScale(0.12)
+              .setDepth(depth + 3);
+            stars.push(star);
+          }
+        }
+      }
+
       const pick = () => {
         selected = model;
         updateSelection();
@@ -1748,7 +2251,7 @@ async function openLimboSelectionDialog(scene) {
       frame.on("pointerdown", pick);
       img.on("pointerdown", pick);
 
-      cards.push({ frame, img, name, model });
+      cards.push({ frame, img, name, model, stars });
     });
 
     const confirmBtn = scene.add.text(600, 500, "Evoca", {
@@ -1764,7 +2267,7 @@ async function openLimboSelectionDialog(scene) {
       padding: { x: 12, y: 6 }
     }).setDepth(depth + 2).setInteractive();
 
-    const controls = [overlay, panel, title, confirmBtn, cancelBtn, ...cards.flatMap(c => [c.frame, c.img, c.name])];
+    const controls = [overlay, panel, title, confirmBtn, cancelBtn, ...cards.flatMap(c => [c.frame, c.img, c.name, ...(c.stars || [])])];
     const cleanup = (choice) => {
       controls.forEach(o => { try { o.destroy(); } catch (_) {} });
       modalOpen = false;
@@ -1848,6 +2351,10 @@ function removeFromLimboSprites(scene, demone) {
   if (idx >= 0) {
     const [sprite] = limboSprites.splice(idx, 1);
     if (sprite._overlay) sprite._overlay.destroy();
+    if (sprite._hoverRect) sprite._hoverRect.destroy();
+    if (sprite._valueOverlay) sprite._valueOverlay.destroy();
+    if (sprite._elementOverlays) sprite._elementOverlays.forEach(icon => icon?.destroy());
+    if (sprite._levelStars) sprite._levelStars.forEach(star => star?.destroy());
     sprite.destroy();
   }
   layoutLimboSprites(scene);
@@ -1860,6 +2367,10 @@ function removePaidFromHand(scene, cartePagate) {
     if (idx >= 0) {
       const [sprite] = hand.splice(idx, 1);
       if (sprite._overlay) sprite._overlay.destroy();
+      if (sprite._hoverRect) sprite._hoverRect.destroy();
+      if (sprite._valueOverlay) sprite._valueOverlay.destroy();
+      if (sprite._elementOverlays) sprite._elementOverlays.forEach(icon => icon?.destroy());
+      if (sprite._levelStars) sprite._levelStars.forEach(star => star?.destroy());
       sprite.destroy();
     }
   });
@@ -1876,6 +2387,9 @@ function removeDemoneFromLimbo(scene, demone) {
   if (sIdx >= 0) {
     const [sprite] = limboSprites.splice(sIdx, 1);
     if (sprite._overlay) sprite._overlay.destroy();
+    if (sprite._valueOverlay) sprite._valueOverlay.destroy();
+    if (sprite._elementOverlays) sprite._elementOverlays.forEach(icon => icon?.destroy());
+    if (sprite._levelStars) sprite._levelStars.forEach(star => star?.destroy());
     sprite.destroy();
     layoutLimboSprites(scene);
   }
@@ -1889,6 +2403,7 @@ function addCerchiaSprite(scene, demone) {
   const texture = getTextureForCard(demone, "demone");
   const card = scene.add.image(1020, 350, texture).setScale(0.12);
   card._model = demone;
+  card._isHumanCerchia = true;  // Flag per differenziare
   addCardOverlay(scene, card, demone, 45);
   attachTooltip(card, () => demoneTooltipText(demone));
   scene.tweens.add({
@@ -1906,9 +2421,32 @@ function addCerchiaSprite(scene, demone) {
     scene.tweens.add({
       targets: card._overlay,
       x: startX + idx * spacing,
-      y: y - (card._overlayOffset || 45),
+      y: y - (card._overlayOffset || 45) - 20,  // +20px up
       duration: 700,
       ease: "Cubic.easeOut",
+    });
+  }
+
+  if (card._levelStars && card._levelStars.length) {
+    syncLevelStarsPosition(card);
+    const cardBounds = card.getBounds();
+    const totalStars = card._levelStars.length;
+    const starWidth = 10;
+    const starSpacing = 2;
+    const totalWidth = (totalStars * starWidth) + ((totalStars - 1) * starSpacing);
+    const startOffsetX = -totalWidth / 2;
+    const offsetY = cardBounds.height / 2 - 21 - 20;  // +20px up
+    
+    card._levelStars.forEach((star, starIdx) => {
+      if (star && star.active) {
+        scene.tweens.add({
+          targets: star,
+          x: startX + idx * spacing + startOffsetX + (starIdx * (starWidth + starSpacing)),
+          y: y + offsetY,
+          duration: 700,
+          ease: "Cubic.easeOut",
+        });
+      }
     });
   }
 }
@@ -1926,15 +2464,24 @@ function tentaConquista(scene, forzato = false) {
     return;
   }
   revealBossCard(scene);
-  const doConquista = () => {
+  const current = gioco.giocatoreCorrente();
+  const doConquista = async () => {
     const boss = gioco.prossimoBoss();
     if (!boss) {
       showBotBalloon(scene, "Sistema", "Nessun boss rimanente", 650, 120);
       if (!forzato && gioco.completeAction) gioco.completeAction(false);
       return;
     }
+    // Prompt Spostastelle per umano (attacco se umano, difesa se bot)
+    const isHumanAttacker = current?.nome === "Player";
+    await maybeUseHumanSpostastelle(scene, isHumanAttacker ? "attacco" : "difesa");
     const ok = gioco.conquistaBoss(boss);
-    showBotBalloon(scene, "Player", ok ? `Conquistato ${boss.nome}!` : `Fallita conquista di ${boss.nome}`, 650, 120);
+    // Se conquista riuscita, il prossimo boss parte coperto
+    if (ok && bossCard) {
+      bossCard.setTexture("boss_back");
+      bossCard.flipped = false;
+    }
+    showBotBalloon(scene, current?.nome || "Player", ok ? `Conquistato ${boss.nome}!` : `Fallita conquista di ${boss.nome}`, 650, 120);
     if (!forzato) {
       if (gioco.completeAction) gioco.completeAction(true);
       else gioco.registraAzione();
@@ -1947,15 +2494,106 @@ function tentaConquista(scene, forzato = false) {
 function updateBossUI(scene) {
   if (!ui.bossName) return;
   const boss = gioco?.prossimoBoss?.() || null;
+  
+  // Distruggi overlay esistenti
+  bossSealOverlays.forEach(overlay => {
+    try { overlay?.destroy(); } catch (_) {}
+  });
+  bossSealOverlays = [];
+  const ensureRingTexts = () => {
+    if (!bossCard || bossRingTexts.length === 5) return;
+    const bossX = 625;
+    const bossY = 320;
+    const cardBounds = bossCard.getBounds();
+    const offsetX = cardBounds.width / 2 + 25;
+    const offsetY = cardBounds.height / 2 - 15;
+    const basePositions = [
+      { x: bossX - offsetX, y: bossY },
+      { x: bossX + offsetX, y: bossY },
+      { x: bossX - offsetX / 2, y: bossY - offsetY },
+      { x: bossX + offsetX / 2, y: bossY - offsetY },
+      { x: bossX, y: bossY + offsetY },
+    ];
+    bossRingTexts = basePositions.map(pos =>
+      scene.add.text(pos.x, pos.y, "-", {
+        font: "bold 18px Arial",
+        fill: "#ffffff",
+        backgroundColor: "rgba(0,0,0,0.7)",
+        padding: { x: 6, y: 4 },
+        stroke: "#000",
+        strokeThickness: 3,
+      }).setOrigin(0.5).setDepth(bossCard.depth + 5)
+    );
+  };
+  
   if (!boss || !bossCard?.flipped) {
     ui.bossName.setText("Boss: ???");
-    ui.bossReq.setText("");
+    if (ui.bossReq) ui.bossReq.setText("");
+    if (ui.bossReqTexts) {
+      ui.bossReqTexts.forEach(t => {
+        t.text.setText(`${t.key}: -`);
+        t.text.setFill(sigilloColor(t.key));
+      });
+    }
+    if (bossCard) bossCard.setTexture("boss_back");
+    if (bossRingTexts && bossRingTexts.length) {
+      bossRingTexts.forEach((t, idx) => {
+        const key = ["E","W","F","T","A"][idx];
+        t.setText("-");
+        t.setFill(sigilloColor(key));
+      });
+    }
     return;
   }
+  
+  ensureRingTexts();
   ui.bossName.setText(`Boss: ${boss.nome}`);
   const vals = boss.valori || {};
-  const reqText = `E${vals.E || 0} W${vals.W || 0} F${vals.F || 0} T${vals.T || 0} A${vals.A || 0}`;
-  ui.bossReq.setText(reqText);
+  if (ui.bossReqTexts) {
+    ui.bossReqTexts.forEach(t => {
+      t.text.setText(`${t.key}: ${vals[t.key] ?? 0}`);
+      t.text.setFill(sigilloColor(t.key));
+    });
+  }
+  
+  // Aggiorna overlay numeri attorno al boss con tween di rotazione simulata
+  if (bossCard && scene && bossRingTexts.length === 5) {
+    const bossX = 625;
+    const bossY = 320;
+    const cardBounds = bossCard.getBounds();
+    const offsetX = cardBounds.width / 2 + 25;
+    const offsetY = cardBounds.height / 2 - 15;
+    
+    const baseKeys = ["E", "W", "F", "T", "A"];
+    const humanSig = (gioco?.giocatori || []).find(p => p.nome === "Player")?.sigillo || null;
+    let rotatedKeys = [...baseKeys];
+    if (humanSig && baseKeys.includes(humanSig)) {
+      const offset = (baseKeys.indexOf(humanSig) - 4 + baseKeys.length) % baseKeys.length; // indice 4 = posizione in basso
+      rotatedKeys = baseKeys.map((_, idx) => baseKeys[(idx + offset) % baseKeys.length]);
+    }
+    
+    const positions = [
+      { x: bossX - offsetX, y: bossY },            // left
+      { x: bossX + offsetX, y: bossY },            // right
+      { x: bossX - offsetX/2, y: bossY - offsetY },// top-left
+      { x: bossX + offsetX/2, y: bossY - offsetY },// top-right
+      { x: bossX, y: bossY + offsetY }             // bottom
+    ];
+    
+    bossRingTexts.forEach((t, idx) => {
+      const key = rotatedKeys[idx];
+      const value = vals[key] ?? 0;
+      t.setFill(sigilloColor(key));
+      t.setText(String(value));
+      scene.tweens.add({
+        targets: t,
+        x: positions[idx].x,
+        y: positions[idx].y,
+        duration: 200,
+        ease: "Sine.easeOut"
+      });
+    });
+  }
 }
 
 function revealBossCard(scene) {
@@ -1993,12 +2631,14 @@ function refreshUI(scene) {
   gioco.giocatori.forEach(p => {
     if (p.nome === "Player") {
       ui.human.sigillo?.setText(`Sigillo: ${p.sigillo || "-"}`);
+      applySigilloColor(ui.human.sigillo, p.sigillo);
       ui.human.boss?.setText(`Boss: ${p.boss_conquistati.length}`);
       ui.human.stelle?.setText(`Stelle: ${p.totale_stelle}`);
     } else {
       const target = ui.bots.find(b => b.nome === p.nome);
       if (target) {
         target.sigillo?.setText(`Sigillo: ${p.sigillo || "-"}`);
+        applySigilloColor(target.sigillo, p.sigillo);
         target.mano?.setText(`Mano: ${p.mano.length}`);
         target.stelle?.setText(`Stelle: ${p.totale_stelle}`);
         target.boss?.setText(`Boss: ${p.boss_conquistati.length}`);
@@ -2021,11 +2661,24 @@ function refreshUI(scene) {
 }
 
 function update() {
-  hand.forEach(syncOverlayPosition);
-  limboSprites.forEach(syncOverlayPosition);
-  cerchiaSprites.forEach(syncOverlayPosition);
+  hand.forEach(sprite => {
+    syncOverlayPosition(sprite);
+    syncValueOverlayPosition(sprite);
+    syncElementOverlaysPosition(sprite);
+  });
+  limboSprites.forEach(sprite => {
+    syncOverlayPosition(sprite);
+    syncLevelStarsPosition(sprite);
+  });
+  cerchiaSprites.forEach(sprite => {
+    syncOverlayPosition(sprite);
+    syncLevelStarsPosition(sprite);
+  });
   Object.values(botCerchiaSprites || {}).forEach(arr => {
-    (arr || []).forEach(syncOverlayPosition);
+    (arr || []).forEach(sprite => {
+      syncOverlayPosition(sprite);
+      syncLevelStarsPosition(sprite);
+    });
   });
 }
 
@@ -2113,6 +2766,12 @@ function decideBotAction(bot) {
     return { tipo: "conquista_boss" };
   }
 
+  // Gioca una magia se presente (priorità)
+  const magia = (bot.mano || []).find(c => (c?.categoria || "").toLowerCase() === "magia");
+  if (magia) {
+    return { tipo: "gioca_magia", carta: magia };
+  }
+
   // Se nel Limbo c'è un demone pagabile che aumenta le stelle, prova a evocarlo
   const payLimbo = findAffordableLimbo(bot);
   if (payLimbo && actionNum <= 2) {
@@ -2133,6 +2792,18 @@ async function performBotAction(scene, bot, azione) {
       await animateBotDrawRifornimento(scene, bot);
       if (gioco.completeAction) gioco.completeAction(true);
       else gioco.registraAzione();
+      break;
+    }
+    case "gioca_magia": {
+      const res = gioco.giocaMagia(bot, azione.carta);
+      if (gioco.onAzione && res?.ok) gioco.onAzione(bot.nome, `Gioca magia ${azione.carta?.nome || ""}`);
+      if (res?.ok) {
+        if (gioco.completeAction) gioco.completeAction(true);
+        else gioco.registraAzione();
+        refreshUI(scene);
+      } else if (gioco.completeAction) {
+        gioco.completeAction(false);
+      }
       break;
     }
     case "paga_limbo": {
@@ -2174,10 +2845,13 @@ async function performBotAction(scene, bot, azione) {
     case "conquista_boss": {
       const boss = gioco.prossimoBoss();
       revealBossCard(scene);
+      // Consenti all'umano di usare Spostastelle in difesa
+      await maybeUseHumanSpostastelle(scene, "difesa");
       gioco.conquistaBoss(boss);
       if (gioco.onAzione && boss) gioco.onAzione(bot.nome, `Tenta ${boss.nome}`);
       if (gioco.completeAction) gioco.completeAction(true);
       else gioco.registraAzione();
+      refreshUI(scene);
       break;
     }
     default:
@@ -2252,6 +2926,29 @@ function animateBotEvocaDemone(scene, bot, demone) {
         y: finalY - (card._overlayOffset || 45),
         duration: 600,
         ease: "Cubic.easeOut",
+      });
+    }
+
+    if (card._levelStars && card._levelStars.length) {
+      syncLevelStarsPosition(card);
+      const cardBounds = card.getBounds();
+      const totalStars = card._levelStars.length;
+      const starWidth = 10;
+      const starSpacing = 2;
+      const totalWidth = (totalStars * starWidth) + ((totalStars - 1) * starSpacing);
+      const startOffsetX = -totalWidth / 2;
+      const offsetY = cardBounds.height / 2 - 21;
+      
+      card._levelStars.forEach((star, starIdx) => {
+        if (star && star.active) {
+          scene.tweens.add({
+            targets: star,
+            x: finalX + startOffsetX + (starIdx * (starWidth + starSpacing)),
+            y: finalY + offsetY,
+            duration: 600,
+            ease: "Cubic.easeOut",
+          });
+        }
       });
     }
   });
