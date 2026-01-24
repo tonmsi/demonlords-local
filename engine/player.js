@@ -25,6 +25,8 @@ export class Giocatore {
     this.azioni_extra = 0;
     this.costo_extra_evocazione = 0;
     this.blocco_evocazioni_turno = false;
+    this._sibilla_used_turn = false;
+    this._ora_used = false;
     this.cerchia.forEach(d => {
       d._azione_usata_turno = false;
     });
@@ -89,7 +91,8 @@ export class Giocatore {
 
   /**
    * Trova una combinazione di carte energia per pagare un costo.
-   * Semplice greedy: soddisfa prima il requisito di tipo, poi somma per valore.
+   * Seleziona la combinazione col totale più basso che soddisfa costo e requisito di tipo.
+   * In caso di parità sul totale, preferisce la combinazione con meno carte.
    */
   trovaPagamento(costoRichiesto, costoTipo = null, costoTipoMinimo = 0) {
     const valoreCarta = (c) => {
@@ -99,45 +102,58 @@ export class Giocatore {
       return 0;
     };
 
-    const energie = this.mano.filter(c => {
+    const energieGrezz = this.mano.filter(c => {
       const cat = (c?.categoria || "").toLowerCase();
-      return cat === "energia" || cat === "magia";
+      // Usa energie e magie standard, evita le magie "azione_boss" (Spostastelle/Stoppastella) per non consumarle nei pagamenti
+      const isMagic = cat === "magia" && !c?.azione_boss;
+      return cat === "energia" || isMagic;
     });
-    if (!energie.length) return [];
+    if (!energieGrezz.length) return [];
 
-    const byValue = [...energie].sort((a, b) => valoreCarta(b) - valoreCarta(a));
-    const pagamento = [];
-    let totale = 0;
-    let valoreTipo = 0;
+    // Limita a 16 carte per evitare esplosione combinatoria
+    const energie = energieGrezz
+      .map((c, idx) => ({ c, v: valoreCarta(c), idx }))
+      .sort((a, b) => a.v - b.v)
+      .slice(0, 16);
 
-    // Prima soddisfa il requisito di tipo specifico (per valore, non per numero di carte)
-    if (costoTipo) {
-      for (const c of byValue) {
-        if (valoreTipo >= costoTipoMinimo) break;
-        if (c?.tipi?.includes?.(costoTipo) || c?.tipo === costoTipo) {
-          pagamento.push(c);
-          const val = valoreCarta(c);
-          totale += val;
-          valoreTipo += val;
+    const N = energie.length;
+    let best = null;
+    const totalMasks = 1 << N;
+
+    const satisfiesTipo = (subset) => {
+      if (!costoTipo) return true;
+      const tipoVal = subset.reduce((sum, entry) => {
+        const c = entry.c;
+        const tipi = c?.tipi || [];
+        const match = tipi.includes(costoTipo) || c?.tipo === costoTipo || c?.tipo === "ENERGIA_ETERE" || tipi.includes("ENERGIA_ETERE");
+        return match ? sum + entry.v : sum;
+      }, 0);
+      return tipoVal >= costoTipoMinimo;
+    };
+
+    // Esplora le combinazioni e scegli quella con overshoot minimo
+    for (let mask = 1; mask < totalMasks; mask += 1) {
+      let total = 0;
+      const subset = [];
+      for (let i = 0; i < N; i += 1) {
+        if (mask & (1 << i)) {
+          subset.push(energie[i]);
+          total += energie[i].v;
         }
+      }
+      if (total < costoRichiesto) continue;
+      if (!satisfiesTipo(subset)) continue;
+
+      if (
+        !best ||
+        total < best.total ||
+        (total === best.total && subset.length < best.len)
+      ) {
+        best = { total, len: subset.length, cards: subset.map(e => e.c) };
       }
     }
 
-    // Poi aggiungi le carte più alte fino a coprire il costo
-    for (const c of byValue) {
-      if (pagamento.includes(c)) continue;
-      if (totale >= costoRichiesto) break;
-      pagamento.push(c);
-      totale += valoreCarta(c);
-    }
-
-    if (totale < costoRichiesto) {
-      return [];
-    }
-    if (costoTipo && valoreTipo < costoTipoMinimo) {
-      return [];
-    }
-    return pagamento;
+    return best ? best.cards : [];
   }
 
   pagaEvocazione(demone, costoEffettivo) {

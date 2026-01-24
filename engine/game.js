@@ -108,6 +108,7 @@ export class Gioco {
       giocatore: giocatore.nome,
       carta: carta?.nome || null,
     });
+    this._emit("pesca_rifornimento", { giocatore, carta });
     this._emit("azione", { giocatore: giocatore.nome, azione: "Pesca rifornimento", carta: carta?.nome || null });
     if (this.onAzione) {
       this.onAzione(giocatore.nome, "Pesca un rifornimento");
@@ -120,7 +121,8 @@ export class Gioco {
     if (!carta) return null;
     if (carta instanceof Imprevisto) {
       // TODO: gestire effetti imprevisti; per ora la scartiamo in pila scarti
-      this.scarti.push(carta);
+      this.scartaCarteDi(giocatore, [carta]);
+      this._emit("pesca_imprevisto", { giocatore, carta });
     }
     this._log("pesca_evocazione", `${giocatore.nome} rivela evocazione`, {
       giocatore: giocatore.nome,
@@ -136,14 +138,11 @@ export class Gioco {
 
   conquistaBoss(boss) {
     if (!boss) return false;
-    if (this.stoppastella_shield) {
-      this.stoppastella_shield = false;
-      this._log("conquista_boss_bloccata", "Tentativo bloccato da Stoppastella", {});
-      if (this.onAzione) this.onAzione(this.giocatoreCorrente().nome, "Conquista bloccata");
-      return false;
-    }
     const player = this.giocatoreCorrente();
     const sig = player?.sigillo;
+    const prevOffset = boss._offset || 0;
+    const prevVals = { ...(boss.valori || {}) };
+
     let requisito = boss.requisitoPer ? boss.requisitoPer(sig) : Infinity;
     const stelle = player?.totale_stelle ?? 0;
 
@@ -152,9 +151,13 @@ export class Gioco {
     if (attSposta && stelle < requisito) {
       const step = this._chooseRotationForAttacker(boss, sig, stelle, attSposta);
       if (step !== null) {
-        boss.ruota(step);
+        this._rotateBoss(boss, step, player);
         requisito = boss.requisitoPer(sig);
         this._consumeSpostastelle(player, attSposta, `Spostastelle attacco ${step}`);
+        // Stoppastella avversaria: ripristina stato precedente
+        if (this._tryStoppastella(player, boss, prevOffset, prevVals)) {
+          requisito = boss.requisitoPer(sig);
+        }
       }
     }
 
@@ -170,10 +173,17 @@ export class Gioco {
         if (!card) continue;
         const step = this._chooseRotationForDefender(boss, sig, stelle, card);
         if (step !== null) {
-          boss.ruota(step);
+          const beforeOffset = boss._offset || 0;
+          const beforeVals = { ...(boss.valori || {}) };
+          this._rotateBoss(boss, step, opp);
           requisito = boss.requisitoPer(sig);
           ok = stelle >= requisito;
           this._consumeSpostastelle(opp, card, `Spostastelle difesa ${step} da ${opp.nome}`);
+          // Attaccante o altri possono stoppare: ripristina
+          if (this._tryStoppastella(opp, boss, beforeOffset, beforeVals)) {
+            requisito = boss.requisitoPer(sig);
+            ok = stelle >= requisito;
+          }
           if (!ok) break;
         }
       }
@@ -218,7 +228,7 @@ export class Gioco {
 
     // Rimuovi dalla mano e metti negli scarti
     giocatore.mano.splice(idx, 1);
-    this.scarti.push(carta);
+    this.scartaCarteDi(giocatore, [carta]);
 
     const nome = (carta.nome || "").toLowerCase();
     const eff = this._risolviMagia(giocatore, carta, nome);
@@ -253,7 +263,11 @@ export class Gioco {
           const tmp = giocatore.mano;
           giocatore.mano = opp.mano;
           opp.mano = tmp;
-          return `Scambia mano con ${opp.nome}`;
+          const msg = `Scambia mano con ${opp.nome}`;
+          this._log("patto", `${giocatore.nome} ${msg}`, { giocatore: giocatore.nome, target: opp.nome });
+          if (this.onAzione) this.onAzione(giocatore.nome, msg);
+          this._emit("hand_changed", { players: [giocatore.nome, opp.nome] });
+          return msg;
         }
         return "Nessun avversario per scambiare";
       }
@@ -287,7 +301,7 @@ export class Gioco {
         const pagate = giocatore.pagaEvocazione(dem, costo);
         if (!pagate) return "Pagamento fallito";
         target.b.cerchia.splice(target.b.cerchia.indexOf(dem), 1);
-        this.scartaCarte(pagate);
+        this.scartaCarteDi(giocatore, pagate);
         giocatore.cerchia.push(dem);
         return `Ruba ${dem.nome} pagando ${costo}`;
       }
@@ -308,7 +322,7 @@ export class Gioco {
         const pagate = giocatore.pagaEvocazione(dem, costo);
         if (!pagate) return "Pagamento fallito";
         this.cimitero.splice(this.cimitero.lastIndexOf(dem), 1);
-        this.scartaCarte(pagate);
+        this.scartaCarteDi(giocatore, pagate);
         giocatore.cerchia.push(dem);
         return `Evoca ${dem.nome} dal cimitero pagando ${costo}`;
       }
@@ -349,18 +363,18 @@ export class Gioco {
         return `Scambia ${myDem.nome} con ${oppDem.nome}`;
       }
       case "illuminazione": {
-        return "Replica effetto demone (non implementato)";
+        return "Illuminazione: replica l'effetto di un tuo demone";
       }
       default: {
         if (carta.azione_boss && carta.azione_boss.rotazione) {
           const boss = this.prossimoBoss();
           const opts = carta.azione_boss.rotazione.opzioni || [];
           if (boss && opts.length) {
-            const step = carta._rotationChoice != null ? carta._rotationChoice : opts[0];
-            boss.ruota(step);
-            return `Ruota boss di ${step}`;
-          }
-        }
+        const step = carta._rotationChoice != null ? carta._rotationChoice : opts[0];
+        this._rotateBoss(boss, step, giocatore);
+        return `Ruota boss di ${step}`;
+      }
+    }
         if (carta.azione_boss && carta.azione_boss.annulla) {
           this.stoppastella_shield = true;
           return "Attiva Stoppastella: blocca il prossimo tentativo di conquista";
@@ -378,8 +392,9 @@ export class Gioco {
   _consumeSpostastelle(giocatore, carta, logMsg = "") {
     const idx = giocatore.mano.indexOf(carta);
     if (idx >= 0) giocatore.mano.splice(idx, 1);
-    this.scarti.push(carta);
+    this.scartaCarteDi(giocatore, [carta]);
     if (logMsg) this._log("spostastelle", logMsg, { giocatore: giocatore.nome, carta: carta.nome });
+    if (this.onAzione && logMsg) this.onAzione(giocatore.nome, logMsg);
   }
 
   _chooseRotationForAttacker(boss, sigillo, stelle, carta) {
@@ -411,12 +426,41 @@ export class Gioco {
       const newReq = boss.requisitoPer(sigilloAtt);
       boss.ruota(-step);
       if (newReq > stelleAtt && newReq > currentReq) {
-        if (!chosen || newReq > chosen.newReq) {
-          chosen = { step, newReq };
+          if (!chosen || newReq > chosen.newReq) {
+            chosen = { step, newReq };
+          }
         }
-      }
     });
     return chosen ? chosen.step : null;
+  }
+
+  _rotateBoss(boss, step, giocatore) {
+    if (!boss || !step) return;
+    boss.ruota(step);
+    this._emit("boss_ruotato", { boss, step, giocatore });
+  }
+
+  _findStoppastella(giocatore) {
+    if (!giocatore?.mano) return null;
+    return giocatore.mano.find(c => c?.azione_boss?.annulla);
+  }
+
+  _tryStoppastella(rotator, boss, prevOffset, prevVals) {
+    for (const pl of this.giocatori) {
+      if (pl === rotator) continue;
+      const stop = this._findStoppastella(pl);
+      if (stop) {
+        const idx = pl.mano.indexOf(stop);
+        if (idx >= 0) pl.mano.splice(idx, 1);
+        this.scartaCarteDi(pl, [stop]);
+        boss._offset = prevOffset;
+        boss.valori = { ...prevVals };
+        this._log("stoppastella", `${pl.nome} annulla lo Spostastelle`, { giocatore: pl.nome, carta: stop.nome });
+        if (this.onAzione) this.onAzione(pl.nome, "Gioca Stoppastella");
+        return true;
+      }
+    }
+    return false;
   }
 
   prossimoBoss() {
@@ -466,12 +510,14 @@ export class Gioco {
     if (!pagate) return { ok: false, motivo: "Pagamento fallito" };
     this.limbo.splice(index, 1);
     giocatore.cerchia.push(demone);
+    this._emit("demone_aggiunto_cerchia", { giocatore, demone, fonte: "limbo" });
     this._log("evoca_da_limbo", `${giocatore.nome} evoca ${demone.nome} dal Limbo`, {
       giocatore: giocatore.nome,
       demone: demone.nome,
       costo,
     });
     this._emit("azione", { giocatore: giocatore.nome, azione: `Evoca ${demone.nome}` });
+    this._emit("evoca_da_limbo", { giocatore, demone, pagate });
     if (this.onAzione) {
       this.onAzione(giocatore.nome, `Evoca ${demone.nome}`);
     }
@@ -491,7 +537,22 @@ export class Gioco {
   }
 
   scartaCarte(carte) {
-    this.scarti.push(...carte);
+    // Metodo legacy: senza attore
+    this.scartaCarteDi(null, carte);
+  }
+
+  scartaCarteDi(giocatore, carte) {
+    const list = Array.isArray(carte) ? carte.filter(Boolean) : [];
+    if (!list.length) return;
+    this.scarti.unshift(...list);
+    const count = list.length;
+    const nome = giocatore?.nome || "Sistema";
+    this._log("scarta", `${nome} scarta ${count} carta/e`, { giocatore: giocatore?.nome || null, count, carte: list.map(c=>c.nome) });
+    this._emit("azione", { giocatore: giocatore?.nome || "Sistema", azione: `Scarta ${count} carta/e` });
+    this._emit("scarta_carte", { giocatore, carte: list });
+    if (this.onAzione) {
+      this.onAzione(nome, `Scarta ${count} carta/e`);
+    }
   }
 
   processaImprevisto(carta, giocatore) {
@@ -525,7 +586,7 @@ export class Gioco {
       case nome.includes("buon_samaritano"): {
         if (giocatore.mano.length) {
           const c = giocatore.mano.shift();
-          if (c) this.scarti.push(c);
+          if (c) this.scartaCarteDi(giocatore, [c]);
         }
         res.effetto = "scarta";
         break;

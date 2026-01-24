@@ -1,4 +1,4 @@
-﻿import { creaPartita } from "./engine/game.js";
+import { creaPartita } from "./engine/game.js";
 import { Demone, Imprevisto, CartaRifornimento, ElementoSimbolo } from "./engine/entities.js";
 
 const config = {
@@ -502,8 +502,8 @@ function create() {
   }
 
   // --- Slot Cerchia Giocatore ---
-  const cerchiaStartX = 820;
-  const cerchiaY = 650;
+  const cerchiaStartX = 950;
+  const cerchiaY = 620;
   const cerchiaSpacing = 120;
   const cerchiaWidth = 80;
   const cerchiaHeight = 110;
@@ -1125,7 +1125,6 @@ async function startNewGame(scene) {
       });
       gioco.addListener("scarta_carte", ({ giocatore, carte }) => {
         emitPassiveEvent(scene, "scarta_carte", { giocatore, carte });
-        handleScartaEvent(scene, giocatore, carte);
       });
       gioco.addListener("evoca_da_limbo", ({ giocatore, demone }) => {
         emitPassiveEvent(scene, "evoca_da_limbo", { giocatore, demone });
@@ -2896,190 +2895,91 @@ function openSpostaDialog(scene, boss, attacker, carte, modo) {
   return new Promise(resolve => {
     modalOpen = true;
     const depth = 6000;
-    const overlay = scene.add.rectangle(625, 340, 1250, 720, 0x000000, 0.5).setDepth(depth).setInteractive();
-    const lineH = 50;
-    // Prepara le righe effettive e rimuove duplicati
-    const rowsData = [];
-    const normalizeSteps = (opts) => {
-      const set = new Set(Array.isArray(opts) ? opts : []);
-      Array.from(set).forEach(s => {
-        if (Math.abs(s) === 2) {
-          const sign = Math.sign(s) || 1;
-          set.add(1 * sign); // aggiungi +/-1 se c'è +/-2
-        }
-      });
-      return Array.from(set);
-    };
-    const seenCombos = new Set();
-    carte.forEach((card, idx) => {
-      const opts = normalizeSteps(card?.azione_boss?.rotazione?.opzioni || []);
-      opts.forEach(step => {
-        const key = `${card?._id || card?.nome || idx}-${step}`;
-        if (seenCombos.has(key)) return;
-        seenCombos.add(key);
-        const { before, after } = simulateReqAfterRotation(boss, attacker?.sigillo, step);
-        const elementRaw = (card?.tipi && card.tipi.length) ? card.tipi[0] : (card?.tipo || card?.elemento || "");
-        const elementLabel = (elementRaw || "").replace(/^ENERGIA_/i, "").replace(/_/g, " ");
-        const energyVal = Number(card?.valore) || 0;
-        const labelText = energyVal ? `${energyVal} ${elementLabel}`.trim() : elementLabel;
-        rowsData.push({ card, step, before, after, labelText });
-      });
-    });
-
-    const totalRows = rowsData.length || 1;
-    const panelHeight = Math.max(220 + totalRows * lineH, 260);
-    const panelX = 950; // spostato a destra
-    const panelY = 260; // spostato piu in alto
-    const panel = scene.add.rectangle(panelX, panelY, 520, panelHeight, 0x1f1f2e, 0.98).setStrokeStyle(2, 0x6666aa).setDepth(depth + 1);
-
-    const titleY = panelY - panelHeight / 2 + 60;
-    const infoY = titleY + 30;
-    const dividerY = infoY + 25;
-    const startY = dividerY + 30;
-
-    const title = scene.add.text(panelX, titleY, "Usa Spostastelle", { font: "24px Arial", fill: "#ffda77", fontStyle: "bold" }).setOrigin(0.5).setDepth(depth + 2);
-    const info = scene.add.text(panelX, infoY, `${attacker?.nome || "-"} (${attacker?.sigillo || "-"}) | Stelle: ${attacker?.totale_stelle ?? "-"}`, { font: "16px Arial", fill: "#ddd" }).setOrigin(0.5).setDepth(depth + 2);
-    const divider = scene.add.line(panelX, dividerY, 0, 0, 480, 0, 0x555555).setDepth(depth + 1);
-    const list = [];
-    rowsData.forEach((rowData, idx) => {
-        const { card, before, after, labelText, step } = rowData;
-        const y = startY + idx * lineH;
-        const row = scene.add.rectangle(panelX, y, 500, 50, 0x2a2a3a, 0.8).setDepth(depth + 1).setStrokeStyle(2, 0x444455).setInteractive({ useHandCursor: true });
-        const cardName = scene.add.text(panelX - 210, y, `${card.nome}${labelText ? " (" + labelText + ")" : ""}`, { font: "bold 14px Arial", fill: "#ffda77" }).setDepth(depth + 2).setOrigin(0, 0.5);
-        const reqBefore = scene.add.text(panelX + 5, y, `${before}`, { font: "bold 13px Arial", fill: "#ff6666" }).setDepth(depth + 2).setOrigin(0.5, 0.5);
-        const arrow = scene.add.text(panelX + 45, y, "->", { font: "bold 16px Arial", fill: "#66dd66" }).setDepth(depth + 2).setOrigin(0.5, 0.5);
-        const reqAfter = scene.add.text(panelX + 85, y, `${after}`, { font: "bold 13px Arial", fill: after < before ? "#66ff66" : "#ffaa66" }).setDepth(depth + 2).setOrigin(0.5, 0.5);
-        row.on("pointerover", () => row.setFillStyle(0x3a3a4a, 0.95));
-        row.on("pointerout", () => row.setFillStyle(0x2a2a3a, 0.8));
-        row.on("pointerdown", () => cleanup({ card, step }));
-        list.push(row, cardName, reqBefore, arrow, reqAfter);
-    });
-    const closeBtn = scene.add.text(625, 600, "Annulla", { font: "14px Arial", fill: "#fff", backgroundColor: "#c04b6e", padding: { x: 8, y: 4 } }).setDepth(depth + 2).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    const controls = [overlay, panel, title, info, divider, closeBtn, ...list];
-    const cleanup = (val) => { controls.forEach(o => { try { o.destroy(); } catch (_) {} }); modalOpen = false; resolve(val); };
-    closeBtn.on("pointerdown", () => cleanup(null));
-  });
-}
-
-// Scarto forzato se mano > 6
-async function enforceHandLimit(scene, giocatore) {
-  const LIMIT = 6;
-  if (!giocatore || (giocatore.mano || []).length <= LIMIT) return;
-  const extra = giocatore.mano.length - LIMIT;
-  if (giocatore.isBot) {
-    // per i bot scarta le prime 'extra' carte in mano
-    const toDiscard = giocatore.mano.slice(0, extra);
-    gioco.scartaCarteDi(giocatore, toDiscard);
-    animateBotDiscard(scene, giocatore.nome, toDiscard.length);
-    refreshUI(scene);
-    return;
-  }
-  await openHandDiscardDialog(scene, giocatore, extra);
-  refreshUI(scene);
-}
-
-function openHandDiscardDialog(scene, giocatore, extra) {
-  return new Promise(resolve => {
-    modalOpen = true;
-    const depth = 4200;
-    const overlay = scene.add.rectangle(675, 360, 1350, 720, 0x000000, 0.55)
-      .setDepth(depth)
-      .setInteractive();
-    const panel = scene.add.rectangle(675, 360, 900, 380, 0x1f1f1f, 0.95)
-      .setDepth(depth + 1)
-      .setStrokeStyle(2, 0x888888);
-    const title = scene.add.text(675, 200, `Scarta ${extra} carta/e (limite 6)`, {
-      font: "22px Arial",
-      fill: "#ffda77"
+    const overlay = scene.add.rectangle(625, 360, 1250, 720, 0x000000, 0.5).setDepth(depth).setInteractive();
+    const panel = scene.add.rectangle(625, 360, 600, 520, 0x1f1f2e, 0.98).setStrokeStyle(2, 0x6666aa).setDepth(depth + 1);
+    
+    const title = scene.add.text(625, 200, "Usa Spostastelle", {
+      font: "24px Arial",
+      fill: "#ffda77",
+      fontStyle: "bold"
     }).setOrigin(0.5).setDepth(depth + 2);
-    const info = scene.add.text(675, 230, "Seleziona le carte da scartare", {
+
+    const modoText = scene.add.text(625, 230, `Modalità: ${modo.toUpperCase()}`, {
       font: "14px Arial",
+      fill: "#aaa",
+      fontStyle: "italic"
+    }).setOrigin(0.5).setDepth(depth + 2);
+
+    const info = scene.add.text(625, 260, `${attacker?.nome || "-"} (${attacker?.sigillo || "-"}) | Stelle: ${attacker?.totale_stelle ?? "-"}`, {
+      font: "13px Arial",
       fill: "#ddd"
     }).setOrigin(0.5).setDepth(depth + 2);
 
-    const cards = [];
-    const startX = 280;
-    const startY = 290;
-    const spacingX = 140;
-    const spacingY = 160;
-    const perRow = 5;
-    const selected = new Set();
+    const divider = scene.add.line(625, 280, 0, 0, 550, 0, 0x555555).setDepth(depth + 1);
 
-    const updateSelected = () => {
-      cards.forEach(c => {
-        const active = selected.has(c.model);
-        c.frame.setStrokeStyle(active ? 4 : 2, active ? 0x00c46b : 0x555555);
-        c.frame.setAlpha(active ? 1 : 0.8);
+    const list = [];
+    const startY = 310;
+    const lineH = 56;
+    
+    carte.forEach((card, idx) => {
+      const opts = card?.azione_boss?.rotazione?.opzioni || [];
+      opts.forEach((step, jdx) => {
+        const { before, after } = simulateReqAfterRotation(boss, attacker?.sigillo, step);
+        const y = startY + (idx * opts.length + jdx) * lineH;
+        
+        const row = scene.add.rectangle(625, y, 550, 50, 0x2a2a3a, 0.8)
+          .setDepth(depth + 1)
+          .setStrokeStyle(2, 0x444455)
+          .setInteractive({ useHandCursor: true });
+        
+        const cardName = scene.add.text(335, y - 12, card.nome, {
+          font: "bold 14px Arial",
+          fill: "#ffda77"
+        }).setDepth(depth + 2).setOrigin(0, 0.5);
+        
+        const rotText = scene.add.text(335, y + 12, `Rotazione: ${step < 0 ? "↻ " : "↷ "}${Math.abs(step)}`, {
+          font: "12px Arial",
+          fill: "#aaa"
+        }).setDepth(depth + 2).setOrigin(0, 0.5);
+        
+        const arrow = scene.add.text(625, y, "→", {
+          font: "bold 16px Arial",
+          fill: "#66dd66"
+        }).setDepth(depth + 2).setOrigin(0.5, 0.5);
+        
+        const reqBefore = scene.add.text(700, y - 12, `${before}`, {
+          font: "bold 13px Arial",
+          fill: "#ff6666"
+        }).setDepth(depth + 2).setOrigin(0.5, 0.5);
+        
+        const reqAfter = scene.add.text(760, y + 12, `${after}`, {
+          font: "bold 13px Arial",
+          fill: after < before ? "#66ff66" : "#ffaa66"
+        }).setDepth(depth + 2).setOrigin(0.5, 0.5);
+
+        row.on("pointerover", () => row.setFillStyle(0x3a3a4a, 0.95));
+        row.on("pointerout", () => row.setFillStyle(0x2a2a3a, 0.8));
+        row.on("pointerdown", () => cleanup({ card, step }));
+        
+        list.push(row, cardName, rotText, arrow, reqBefore, reqAfter);
       });
-    };
-
-    giocatore.mano.forEach((model, idx) => {
-      const col = idx % perRow;
-      const row = Math.floor(idx / perRow);
-      const cx = startX + col * spacingX;
-      const cy = startY + row * spacingY;
-
-      const frame = scene.add.rectangle(cx, cy, 105, 140, 0x333333, 0.9)
-        .setDepth(depth + 1)
-        .setStrokeStyle(2, 0x555555)
-        .setInteractive();
-      const tex = getTextureForCard(model, model instanceof CartaRifornimento ? "rifornimento" : "demone");
-      const img = scene.add.image(cx, cy - 5, tex).setScale(0.09).setDepth(depth + 2);
-      const name = scene.add.text(cx, cy + 65, truncateText(model.nome || "", 12), {
-        font: "11px Arial",
-        fill: "#fff"
-      }).setOrigin(0.5).setDepth(depth + 2);
-
-      const toggle = () => {
-        if (selected.has(model)) {
-          selected.delete(model);
-        } else {
-          if (selected.size < extra) selected.add(model);
-        }
-        updateSelected();
-      };
-      frame.on("pointerdown", toggle);
-      img.on("pointerdown", toggle);
-
-      cards.push({ frame, img, name, model });
     });
 
-    const confirm = scene.add.text(600, 520, "Conferma", {
-      font: "16px Arial",
+    const closeBtn = scene.add.text(625, 600, "✖ Annulla", {
+      font: "14px Arial",
       fill: "#fff",
-      backgroundColor: "#3a9c4f",
-      padding: { x: 12, y: 6 }
-    }).setDepth(depth + 2).setInteractive({ useHandCursor: true });
+      backgroundColor: "#666",
+      padding: { x: 8, y: 4 }
+    }).setDepth(depth + 2).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
-    const cancel = scene.add.text(750, 520, "Annulla", {
-      font: "16px Arial",
-      fill: "#fff",
-      backgroundColor: "#c04b6e", // rosino per maggiore visibilita
-      padding: { x: 12, y: 6 }
-    }).setDepth(depth + 2).setInteractive({ useHandCursor: true });
-
-    const cleanup = () => {
-      [overlay, panel, title, info, confirm, cancel, ...cards.flatMap(c => [c.frame, c.img, c.name])].forEach(o => {
-        try { o.destroy(); } catch (_) {}
-      });
+    const controls = [overlay, panel, title, modoText, info, divider, closeBtn, ...list];
+    const cleanup = (val) => {
+      controls.forEach(o => { try { o.destroy(); } catch (_) {} });
       modalOpen = false;
+      resolve(val);
     };
-
-    confirm.on("pointerdown", () => {
-      if (selected.size !== extra) return;
-      const toDiscard = Array.from(selected);
-      gioco.scartaCarteDi(giocatore, toDiscard);
-      removePaidFromHand(scene, toDiscard);
-      updateDiscardPileUI(scene);
-      syncHumanHand(scene);
-      refreshUI(scene);
-      cleanup();
-      resolve();
-    });
-
-    cancel.on("pointerdown", () => { cleanup(); resolve(); });
-    overlay.on("pointerdown", () => { cleanup(); resolve(); });
-    updateSelected();
+    
+    closeBtn.on("pointerdown", () => cleanup(null));
   });
 }
 
@@ -3269,31 +3169,36 @@ function syncHumanHand(scene) {
 function layoutHumanCerchia(scene) {
   cerchiaSprites = cerchiaSprites.filter(s => s?.active);
   const slots = (ui && ui.human && ui.human.cerchiaSlots) || [];
-  const startX = slots.length ? slots[0].x : 820;
+  const startX = slots.length ? slots[0].x : 950;
   const spacing = slots.length > 1 ? (slots[1].x - slots[0].x) : 120;
-  const y = slots.length ? slots[0].y : 650;
-  
-  console.log('layoutHumanCerchia:', {
-    spritesCount: cerchiaSprites.length, 
-    slotsLength: slots.length,
-    startX,
-    spacing,
-    slots: slots.map(s => s.x)
-  });
-  
+  const y = slots.length ? slots[0].y : 620;
   cerchiaSprites.forEach((sprite, idx) => {
     const targetX = slots[idx]?.x ?? (startX + idx * spacing);
     const targetY = slots[idx]?.y ?? y;
-    
-    console.log(`  sprite ${idx}: targetX=${targetX}, targetY=${targetY}`);
-    
-    // Imposta direttamente la posizione invece di usare tweens
-    sprite.setPosition(targetX, targetY);
+    scene.tweens.add({
+      targets: sprite,
+      x: targetX,
+      y: targetY,
+      duration: 400,
+      ease: "Cubic.easeOut",
+    });
     if (sprite._overlay) {
-      sprite._overlay.setPosition(targetX, targetY - (sprite._overlayOffset || 45) - 20);
+      scene.tweens.add({
+        targets: sprite._overlay,
+        x: targetX,
+        y: targetY - (sprite._overlayOffset || 45) - 20,
+        duration: 400,
+        ease: "Cubic.easeOut",
+      });
     }
     if (sprite._hoverRect) {
-      sprite._hoverRect.setPosition(targetX, targetY);
+      scene.tweens.add({
+        targets: sprite._hoverRect,
+        x: targetX,
+        y: targetY,
+        duration: 400,
+        ease: "Cubic.easeOut",
+      });
     }
     if (sprite._levelStars && sprite._levelStars.length) {
       const cardBounds = sprite.getBounds();
@@ -3305,10 +3210,13 @@ function layoutHumanCerchia(scene) {
       const offsetY = cardBounds.height / 2 - 21 - 20;
       sprite._levelStars.forEach((star, starIdx) => {
         if (star && star.active) {
-          star.setPosition(
-            targetX + startOffsetX + (starIdx * (starWidth + starSpacing)),
-            targetY + offsetY
-          );
+          scene.tweens.add({
+            targets: star,
+            x: targetX + startOffsetX + (starIdx * (starWidth + starSpacing)),
+            y: targetY + offsetY,
+            duration: 400,
+            ease: "Cubic.easeOut",
+          });
         }
       });
     }
@@ -3725,98 +3633,76 @@ function removeDemoneFromLimbo(scene, demone) {
   }
 }
 
-// Gestione scarti per mantenere UI cerchia/mani in sync (es. Esorcismo)
-function handleScartaEvent(scene, giocatore, carte = []) {
-  if (!Array.isArray(carte) || !carte.length) return;
-
-  // Rimuovi eventuali sprite di cerchia del giocatore
-  carte.forEach(card => {
-    if (!(card instanceof Demone)) return;
-    // umano
-    const idx = cerchiaSprites.findIndex(s => s._model === card);
-    if (idx >= 0) {
-      const [sprite] = cerchiaSprites.splice(idx, 1);
-      try { sprite._overlay?.destroy(); } catch (_) {}
-      try { sprite.destroy(); } catch (_) {}
-      layoutHumanCerchia(scene);
-    }
-    // bot
-    if (giocatore?.isBot) {
-      const arr = botCerchiaSprites[giocatore.nome] || [];
-      const bIdx = arr.findIndex(s => s._model === card);
-      if (bIdx >= 0) {
-        const [sprite] = arr.splice(bIdx, 1);
-        try { sprite._overlay?.destroy(); } catch (_) {}
-        try { sprite.destroy(); } catch (_) {}
-      }
-    }
-  });
-
-  // Rimuovi eventuali carte mano dall'UI umano
-  if (!giocatore?.isBot) {
-    removePaidFromHand(scene, carte);
-    syncHumanHand(scene);
-  }
-
-  layoutHumanCerchia(scene);
-  syncBotCerchiaSprites(scene);
-  updateDiscardPileUI(scene);
-  refreshUI(scene);
-}
-
-// 🔧 FIX REQUEST:
-// When a demon card is summoned to the player's circle (like "Boto Cor de Rosa"),
-// it appears in the wrong position or duplicates on screen.
-// Please ensure that demon cards are added to the player's circle ONLY ONCE,
-// and that no other functions (refreshUI, syncHumanHand, or drawCard) recreate the same sprite.
-// Keep addCerchiaSprite() as the only place that adds the demon image to the scene.
 function addCerchiaSprite(scene, demone, owner = null) {
   const proprietario = owner || gioco?.giocatoreCorrente?.() || null;
-
-  // Se il proprietario è un bot, usa l’animazione dedicata e basta
   if (proprietario && proprietario.isBot) {
     animateBotEvocaDemone(scene, proprietario, demone);
     return;
   }
-
-  // ✅ Evita duplicazioni: controlla se la carta è già presente nella cerchia
-  const existing = cerchiaSprites.find(s => s._model === demone);
-  if (existing) return; // già disegnata, esci subito
-
-  // Calcola la posizione: se ci sono già demoni, posiziona a destra dell'ultimo
-  const slots = (ui && ui.human && ui.human.cerchiaSlots) || [];
-  const idx = cerchiaSprites.length;
   
-  let targetX, targetY;
-  if (cerchiaSprites.length > 0) {
-    // Posiziona a destra del demone precedente
-    const lastDemon = cerchiaSprites[cerchiaSprites.length - 1];
-    const spacing = slots.length > 1 ? (slots[1].x - slots[0].x) : 120;
-    targetX = lastDemon.x + spacing;
-    targetY = lastDemon.y;
-  } else {
-    // Primo demone: usa il primo slot o il fallback
-    const startX = slots.length ? slots[0].x : 820;
-    const y = slots.length ? slots[0].y : 650;
-    targetX = slots[0]?.x ?? startX;
-    targetY = slots[0]?.y ?? y;
-  }
-
-  console.log('addCerchiaSprite:', {idx, targetX, targetY, previousCount: cerchiaSprites.length});
-
-  // Crea il demone direttamente nella posizione finale
+  // Calcola posizione di destinazione in base all'indice corrente
+  const idx = cerchiaSprites.length;
+  const slots = (ui && ui.human && ui.human.cerchiaSlots) || [];
+  const startX = slots.length ? slots[0].x : 950;
+  const spacing = slots.length > 1 ? (slots[1].x - slots[0].x) : 120;
+  const y = slots.length ? slots[0].y : 620;
+  const targetX = slots[idx]?.x ?? (startX + idx * spacing);
+  const targetY = slots[idx]?.y ?? y;
+  
   const texture = getTextureForCard(demone, "demone");
-  const card = scene.add.image(targetX, targetY, texture).setScale(0.12);
+  // Crea la carta al centro dello schermo
+  const card = scene.add.image(675, 350, texture).setScale(0.12);
   card._model = demone;
   card._isHumanCerchia = true;
-
-  // Aggiungi overlay e tooltip
   addCardOverlay(scene, card, demone, 45);
   attachTooltip(card, () => demoneTooltipText(demone));
-
-  // Aggiungi subito all'array senza chiamare layoutHumanCerchia
-  // (verrà chiamato automaticamente da refreshUI)
-  cerchiaSprites.push(card);
+  attachDemoneActionHandlers(scene, card, demone);
+  
+  // Anima verso lo slot di destinazione
+  scene.tweens.add({
+    targets: card,
+    x: targetX,
+    y: targetY,
+    duration: 600,
+    ease: "Back.easeOut",
+    onComplete: () => {
+      cerchiaSprites.push(card);
+    }
+  });
+  
+  // Anima overlay nome se esiste
+  if (card._overlay) {
+    scene.tweens.add({
+      targets: card._overlay,
+      x: targetX,
+      y: targetY - (card._overlayOffset || 45) - 20,
+      duration: 600,
+      ease: "Back.easeOut"
+    });
+  }
+  
+  // Anima stelle se esistono
+  if (card._levelStars && card._levelStars.length) {
+    const cardBounds = card.getBounds();
+    const totalStars = card._levelStars.length;
+    const starWidth = 10;
+    const starSpacing = 2;
+    const totalWidth = (totalStars * starWidth) + ((totalStars - 1) * starSpacing);
+    const startOffsetX = -totalWidth / 2;
+    const offsetY = cardBounds.height / 2 - 21 - 20;
+    
+    card._levelStars.forEach((star, starIdx) => {
+      if (star && star.active) {
+        scene.tweens.add({
+          targets: star,
+          x: targetX + startOffsetX + (starIdx * (starWidth + starSpacing)),
+          y: targetY + offsetY,
+          duration: 600,
+          ease: "Back.easeOut"
+        });
+      }
+    });
+  }
 }
 
 function nextTurn(scene) {
@@ -4101,8 +3987,6 @@ function sleep(ms) {
 async function advanceTurn(scene) {
   if (!giocoPronto || !gioco) return;
   const prev = gioco.giocatoreCorrente();
-  // Limite mano 6 carte a fine turno
-  await enforceHandLimit(scene, prev);
   gioco._orias_block = false;
   gioco.prossimoTurno();
   if (asmodeoSwaps.length) revertAsmodeoSwaps(scene, prev);
@@ -4693,13 +4577,3 @@ function updateDiscardPileUI(scene) {
   const has = (gioco?.scarti?.length || 0) > 0;
   discardPileSprite.setTexture(has ? "discard_pile" : "discard_empty");
 }
-
-
-
-
-
-
-
-
-
-
