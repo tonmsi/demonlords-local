@@ -255,23 +255,27 @@ function create() {
     tentaConquista(this);
   });
   
-  // Rettangolo dietro scritte boss
+  // Rettangolo e testo boss (nome + requisiti)
+  const bossPanel = { cx: 625, cy: 440, w: 230, h: 70, r: 10 };
   {
     const g = this.add.graphics();
-    const cx = 625, cy = 440, w = 220, h = 32, r = 8;
+    const { cx, cy, w, h, r } = bossPanel;
     g.fillStyle(0x000000, 0.7);
     g.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, r);
     g.lineStyle(2, 0xFFD700, 1);
     g.strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, r);
   }
-  
-  ui.bossName = this.add.text(625, 430, "Boss: -", { font: "16px Arial", fill: "#fff" }).setOrigin(0.5);
+  const bossNameY = bossPanel.cy - 14;
+  const bossReqY = bossPanel.cy + 12;
+  ui.bossName = this.add.text(bossPanel.cx, bossNameY, "Boss: -", { font: "18px Arial", fill: "#fff" }).setOrigin(0.5);
   // requisiti boss per elemento, colorati
-  ui.bossReq = this.add.text(625, 450, "", { font: "12px Arial", fill: "#aaa" }).setOrigin(0.5).setVisible(false);
+  ui.bossReq = this.add.text(bossPanel.cx, bossReqY, "", { font: "13px Arial", fill: "#ddd" }).setOrigin(0.5).setVisible(false);
   ui.bossReqTexts = [];
   const reqKeys = ["E", "W", "F", "T", "A"];
+  const reqSpacing = 30;
+  const reqStartX = bossPanel.cx - ((reqKeys.length - 1) * reqSpacing) / 2;
   reqKeys.forEach((k, i) => {
-    const tx = this.add.text(530 + i * 30, 450, `${k}: -`, {
+    const tx = this.add.text(reqStartX + i * reqSpacing, bossReqY, `${k}: -`, {
       font: "12px Arial",
       fill: sigilloColor(k)
     }).setOrigin(0.5);
@@ -1224,7 +1228,9 @@ async function drawCard(scene, tipo) {
         pendingDemone = null;
       } else if (cartaModel instanceof Imprevisto) {
         const eff = gioco.processaImprevisto(cartaModel, giocatore);
-        handleImprevisto(scene, eff);
+        handleImprevisto(scene, eff, giocatore);
+        flashImprevistoCard(scene, { x: 625, y: 280 });
+        showImprevistoEffectBalloon(scene, `${cartaModel.nome}: ${describeImprevistoEffect(eff)}`);
         showBotBalloon(scene, giocatore.nome, `Imprevisto: ${cartaModel.nome}`, 625, 100);
         actionUsed = true;
       }
@@ -1436,6 +1442,20 @@ async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
         font: "16px Arial", fill: "#fff"
       }).setOrigin(0.5).setDepth(depth + 3);
 
+      // icona elemento accanto al valore
+      const elementMap = {
+        "ENERGIA_ARIA": "aria",
+        "ENERGIA_ACQUA": "acqua",
+        "ENERGIA_TERRA": "terra",
+        "ENERGIA_FUOCO": "fuoco",
+        "ENERGIA_ETERE": "etere"
+      };
+      const tipi = Array.isArray(model.tipi) ? model.tipi : (model.tipo ? [model.tipo] : []);
+      const elementKey = (tipi.map(t => elementMap[t]).find(Boolean)) || null;
+      const elementIcon = elementKey && scene.textures.exists(`overlay_tipo_${elementKey}`)
+        ? scene.add.image(cx + 28, cy + 53, `overlay_tipo_${elementKey}`).setScale(0.18).setDepth(depth + 3)
+        : null;
+
       const select = () => {
         if (selected.has(model)) {
           selected.delete(model);
@@ -1456,7 +1476,7 @@ async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
       bg.on("pointerdown", select);
       img.on("pointerdown", select);
 
-      cardEntries.push({ bg, img, valText, model, overlay });
+      cardEntries.push({ bg, img, valText, model, overlay, elementIcon });
     });
 
     // === TESTO TOTALE & STATO ===
@@ -1495,7 +1515,7 @@ async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
     const controls = [
       overlay, panel, title, reqText, effettoText,
       demSprite, demonOverlay, ...demonStars, totalText, statusText,
-      evocaBtn, limboBtn, closeX, ...cardEntries.flatMap(c => [c.bg, c.img, c.valText, c.overlay])
+      evocaBtn, limboBtn, closeX, ...cardEntries.flatMap(c => [c.bg, c.img, c.valText, c.overlay, c.elementIcon].filter(Boolean))
     ];
 
     // === FUNZIONI INTERNE ===
@@ -1561,7 +1581,7 @@ async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
   });
 }
 
-function handleImprevisto(scene, eff) {
+function handleImprevisto(scene, eff, giocatore = null) {
   if (!eff || !eff.effetto) return;
   switch (eff.effetto) {
     case "fine_turno":
@@ -1570,8 +1590,22 @@ function handleImprevisto(scene, eff) {
     case "conquista_immediata":
       tentaConquista(scene, true);
       break;
+    case "culto_agnello":
+      if (eff.sacrificato) {
+        if (giocatore?.isBot) {
+          animateBotDiscard(scene, giocatore.nome, 1);
+        } else {
+          removeFromHumanCerchiaSprites(scene, eff.sacrificato);
+        }
+      }
+      break;
+    case "scarti_recuperati":
+      break;
     default:
       refreshUI(scene);
+  }
+  if (giocatore && !giocatore.isBot) {
+    syncHumanHand(scene);
   }
 }
 
@@ -1915,26 +1949,33 @@ async function selkieEffect(scene, giocatore) {
 
 async function jakalopeEffect(scene, giocatore) {
   if (!gioco || !gioco.mazzo_rifornimenti) return;
-  // cerca energia terra con valore esattamente 3
-  const stack = [];
-  let found = null;
-  while (gioco.mazzo_rifornimenti.size > 0) {
-    const c = gioco.mazzo_rifornimenti.pesca();
-    if (c?.tipo === "ENERGIA_TERRA" && c?.valore === 3) {
-      found = c;
-      break;
+  const deckCards = gioco.mazzo_rifornimenti.carte || [];
+  const isEnergy3 = (c) => (c?.valore === 3) && ((c?.categoria || c?.tipo || "").toLowerCase().includes("energia"));
+
+  if (giocatore?.isBot) {
+    const idx = deckCards.findIndex(c => c?.tipo === "ENERGIA_TERRA" && c?.valore === 3);
+    if (idx >= 0) {
+      const [found] = deckCards.splice(idx, 1);
+      giocatore.mano.push(found);
     }
-    stack.push(c);
+    refreshUI(scene);
+    return;
   }
-  // rimettere le altre in cima
-  while (stack.length) {
-    gioco.mazzo_rifornimenti.inserisciInCima(stack.pop());
+
+  const matches = deckCards
+    .map((c, i) => ({ card: c, idx: i }))
+    .filter(({ card }) => isEnergy3(card));
+  if (!matches.length) {
+    refreshUI(scene);
+    return;
   }
-  if (found) {
-    giocatore.mano.push(found);
-    if (!giocatore?.isBot) addCardToHand(scene, found, { silent: true });
-  }
-  if (!giocatore?.isBot) syncHumanHand(scene);
+
+  const choice = await openJakalopeChoice(scene, matches.map(m => m.card)) || matches[0].card;
+  const chosenIdx = deckCards.lastIndexOf(choice);
+  if (chosenIdx >= 0) deckCards.splice(chosenIdx, 1);
+  giocatore.mano.push(choice);
+  addCardToHand(scene, choice, { silent: true });
+  syncHumanHand(scene);
   refreshUI(scene);
 }
 
@@ -2318,11 +2359,91 @@ async function openBabiChoice(scene, pool) {
     overlay.on("pointerdown", () => cleanup(null));
   });
 }
+
+async function openJakalopeChoice(scene, cards) {
+  return new Promise(resolve => {
+    modalOpen = true;
+    const depth = 6450;
+    const overlay = scene.add.rectangle(625, 360, 1250, 720, 0x000000, 0.45).setDepth(depth).setInteractive();
+    const panel = scene.add.rectangle(625, 360, 820, 320, 0x1f1f2e, 0.95)
+      .setDepth(depth + 1).setStrokeStyle(2, 0x888888);
+    const title = scene.add.text(625, 250, "Jakalope: scegli un'energia di valore 3", {
+      font: "20px Arial",
+      fill: "#ffda77"
+    }).setOrigin(0.5).setDepth(depth + 2);
+
+    const startX = 320;
+    const spacing = 110;
+    const cardSprites = [];
+    let selected = cards[0];
+
+    cards.forEach((c, i) => {
+      const cx = startX + i * spacing;
+      const cy = 360;
+      const frame = scene.add.rectangle(cx, cy, 100, 140, 0x333344, 0.85)
+        .setDepth(depth + 1)
+        .setStrokeStyle(2, 0x555577)
+        .setInteractive({ useHandCursor: true });
+      const tex = getTextureForCard(c, "rifornimento");
+      const img = scene.add.image(cx, cy, tex).setScale(0.11).setDepth(depth + 2);
+      const name = scene.add.text(cx, cy + 80, truncateText(c.nome || "", 12), {
+        font: "12px Arial",
+        fill: "#fff"
+      }).setOrigin(0.5).setDepth(depth + 2);
+      const mark = scene.add.text(cx + 36, cy - 60, "★", {
+        font: "16px Arial",
+        fill: "#FFD700",
+        stroke: "#000",
+        strokeThickness: 3
+      }).setDepth(depth + 3).setAlpha(i === 0 ? 1 : 0).setOrigin(0.5);
+
+      const pick = () => {
+        selected = c;
+        cardSprites.forEach(card => {
+          card.mark.setAlpha(card.model === selected ? 1 : 0);
+          card.frame.setStrokeStyle(3, card.model === selected ? 0xFFD700 : 0x555577);
+        });
+      };
+      frame.on("pointerdown", pick);
+      img.on("pointerdown", pick);
+      cardSprites.push({ frame, img, name, mark, model: c });
+    });
+
+    const confirm = scene.add.text(585, 470, "Prendi", {
+      font: "18px Arial",
+      fill: "#fff",
+      backgroundColor: "#3a9c4f",
+      padding: { x: 12, y: 6 }
+    }).setDepth(depth + 2).setInteractive({ useHandCursor: true });
+    const cancel = scene.add.text(705, 470, "Annulla", {
+      font: "18px Arial",
+      fill: "#fff",
+      backgroundColor: "#666",
+      padding: { x: 12, y: 6 }
+    }).setDepth(depth + 2).setInteractive({ useHandCursor: true });
+
+    const controls = [overlay, panel, title, confirm, cancel, ...cardSprites.flatMap(c => [c.frame, c.img, c.name, c.mark])];
+    const cleanup = (val) => {
+      controls.forEach(o => { try { o.destroy(); } catch (_) {} });
+      modalOpen = false;
+      resolve(val);
+    };
+
+    confirm.on("pointerdown", () => cleanup(selected));
+    cancel.on("pointerdown", () => cleanup(null));
+    overlay.on("pointerdown", () => cleanup(null));
+  });
+}
 function pickLowestEnergyOrAny(handArr) {
   if (!Array.isArray(handArr) || !handArr.length) return null;
   const sorted = handArr.slice().sort((a, b) => {
+    const isEtereA = (a?.tipo === "ENERGIA_ETERE") || (a?.tipi || []).includes("ENERGIA_ETERE");
+    const isEtereB = (b?.tipo === "ENERGIA_ETERE") || (b?.tipi || []).includes("ENERGIA_ETERE");
     const va = typeof a?.valore === "number" ? a.valore : 99;
     const vb = typeof b?.valore === "number" ? b.valore : 99;
+    // Penalizza etere: scartale per ultime a parità di valore
+    if (isEtereA && !isEtereB) return 1;
+    if (!isEtereA && isEtereB) return -1;
     return va - vb;
   });
   return sorted[0] || null;
@@ -2928,7 +3049,7 @@ function openSpostaDialog(scene, boss, attacker, carte, modo) {
 
     const totalRows = rowsData.length || 1;
     const panelHeight = Math.max(220 + totalRows * lineH, 260);
-    const panelX = 950; // spostato a destra
+    const panelX = 1050; // spostato ulteriormente a destra
     const panelY = 260; // spostato piu in alto
     const panel = scene.add.rectangle(panelX, panelY, 520, panelHeight, 0x1f1f2e, 0.98).setStrokeStyle(2, 0x6666aa).setDepth(depth + 1);
 
@@ -2954,7 +3075,9 @@ function openSpostaDialog(scene, boss, attacker, carte, modo) {
         row.on("pointerdown", () => cleanup({ card, step }));
         list.push(row, cardName, reqBefore, arrow, reqAfter);
     });
-    const closeBtn = scene.add.text(625, 600, "Annulla", { font: "14px Arial", fill: "#fff", backgroundColor: "#c04b6e", padding: { x: 8, y: 4 } }).setDepth(depth + 2).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    const closeX = panelX;
+    const closeY = panelY + panelHeight / 2 + 30;
+    const closeBtn = scene.add.text(closeX, closeY, "Annulla", { font: "14px Arial", fill: "#fff", backgroundColor: "#c04b6e", padding: { x: 8, y: 4 } }).setDepth(depth + 2).setOrigin(0.5).setInteractive({ useHandCursor: true });
     const controls = [overlay, panel, title, info, divider, closeBtn, ...list];
     const cleanup = (val) => { controls.forEach(o => { try { o.destroy(); } catch (_) {} }); modalOpen = false; resolve(val); };
     closeBtn.on("pointerdown", () => cleanup(null));
@@ -3374,12 +3497,40 @@ function syncBotCerchiaSprites(scene) {
     const arr = botCerchiaSprites[bot.nome] || (botCerchiaSprites[bot.nome] = []);
     // Rimuovi sprite non più presenti
     const filtered = [];
+    const seen = new Set();
     arr.forEach(sprite => {
-      if (bot.cerchia.includes(sprite._model)) {
+      if (bot.cerchia.includes(sprite._model) && !seen.has(sprite._model)) {
         filtered.push(sprite);
+        seen.add(sprite._model);
+        if (sprite._model) {
+          sprite._model._cerchiaHasSprite = true;
+          sprite._model._cerchiaAnimating = false;
+        }
       } else {
-        if (sprite._overlay) sprite._overlay.destroy();
-        sprite.destroy();
+        if (sprite._model) {
+          sprite._model._cerchiaHasSprite = false;
+          sprite._model._cerchiaAnimating = false;
+        }
+        // dissolve rapidamente per evitare flash duplicati
+        const destroySprite = () => {
+          try { sprite._overlay?.destroy(); } catch (_) {}
+          try { sprite._valueOverlay?.destroy(); } catch (_) {}
+          try { sprite._elementOverlays?.forEach(icon => icon?.destroy()); } catch (_) {}
+          try { sprite._levelStars?.forEach(star => star?.destroy()); } catch (_) {}
+          try { sprite._hoverRect?.destroy(); } catch (_) {}
+          try { sprite.destroy(); } catch (_) {}
+        };
+        if (scene && scene.tweens) {
+          scene.tweens.add({
+            targets: sprite,
+            alpha: 0,
+            scale: sprite.scale * 0.8,
+            duration: 500, // rimuovi leggermente in anticipo
+            onComplete: destroySprite,
+          });
+        } else {
+          destroySprite();
+        }
       }
     });
     botCerchiaSprites[bot.nome] = filtered;
@@ -3388,11 +3539,12 @@ function syncBotCerchiaSprites(scene) {
     const pos = botPositions[bot.nome];
     const spacing = 75; // leggermente più distanza tra carte
     bot.cerchia.forEach((d, idx) => {
-      if (!filtered.find(s => s._model === d)) {
+      if (!filtered.find(s => s._model === d) && !d._cerchiaAnimating && !d._cerchiaHasSprite) {
         const texture = getTextureForCard(d, "demone");
         const card = scene.add.image(pos.cerchia.x, pos.cerchia.y, texture).setScale(0.08);
         card._model = d;
         addCardOverlay(scene, card, d);
+        d._cerchiaHasSprite = true;
         filtered.push(card);
       }
     });
@@ -4301,6 +4453,8 @@ async function performBotAction(scene, bot, azione) {
       if (idx >= 0) {
         const res = gioco.evocaDaLimbo(idx, bot);
         if (res.ok) {
+          azione.carta._cerchiaAnimating = true;
+          azione.carta._cerchiaHasSprite = false;
           if (gioco.onAzione) gioco.onAzione(bot.nome, `Evoca ${azione.carta.nome} dal Limbo`);
           await animateBotEvocaDemone(scene, bot, azione.carta);
           await handleDemoneEntrata(scene, bot, azione.carta);
@@ -4316,6 +4470,8 @@ async function performBotAction(scene, bot, azione) {
         const costo = gioco.calcolaCostoEffettivo(bot, carta);
         const pagate = bot.pagaEvocazione(carta, costo);
         if (pagate) {
+          carta._cerchiaAnimating = true;
+          carta._cerchiaHasSprite = false;
           bot.cerchia.push(carta);
           gioco.scartaCarte(pagate);
           if (gioco.onAzione) gioco.onAzione(bot.nome, `Evoca ${carta.nome}`);
@@ -4327,7 +4483,10 @@ async function performBotAction(scene, bot, azione) {
           await animateBotDemoneToLimbo(scene, carta);
         }
       } else if (carta instanceof Imprevisto) {
-        gioco.processaImprevisto(carta, bot);
+        const res = gioco.processaImprevisto(carta, bot);
+        flashImprevistoCard(scene, { x: 625, y: 280 });
+        showImprevistoEffectBalloon(scene, `${carta.nome}: ${describeImprevistoEffect(res)}`);
+        handleImprevisto(scene, res, bot);
         if (gioco.onAzione) gioco.onAzione(bot.nome, `Imprevisto: ${carta.nome}`);
       }
       if (gioco.completeAction) gioco.completeAction(true);
@@ -4494,8 +4653,11 @@ function animateBotDiscard(scene, botName, count = 1) {
 
 function animateBotEvocaDemone(scene, bot, demone) {
   return new Promise(resolve => {
+    demone._cerchiaAnimating = true; // segna in animazione per evitare duplicati
     const pos = botPositions[bot.nome];
     if (!pos) {
+      demone._cerchiaAnimating = false;
+      demone._cerchiaHasSprite = false;
       resolve();
       return;
     }
@@ -4522,6 +4684,8 @@ function animateBotEvocaDemone(scene, bot, demone) {
       duration: 600,
       ease: "Cubic.easeOut",
       onComplete: () => {
+        demone._cerchiaAnimating = false;
+        demone._cerchiaHasSprite = true;
         cerchiaArray.push(card);
         resolve();
       },
@@ -4559,6 +4723,73 @@ function animateBotEvocaDemone(scene, bot, demone) {
         }
       });
     }
+  });
+}
+
+function flashImprevistoCard(scene, pos = { x: 625, y: 280 }) {
+  if (!scene || !scene.add || !scene.tweens) return;
+  const card = scene.add.image(pos.x, pos.y, "imprevisto").setScale(0.22).setDepth(6200);
+  card.setAlpha(0);
+  scene.tweens.add({
+    targets: card,
+    alpha: 1,
+    scale: card.scale * 1.05,
+    duration: 160,
+    ease: "Cubic.easeOut",
+  });
+  scene.tweens.add({
+    targets: card,
+    alpha: 0,
+    scale: card.scale * 0.9,
+    duration: 400,
+    delay: 450,
+    ease: "Cubic.easeIn",
+    onComplete: () => { try { card.destroy(); } catch (_) {} },
+  });
+}
+
+function describeImprevistoEffect(eff) {
+  const key = (eff?.effetto || "").toLowerCase();
+  switch (key) {
+    case "costo_extra": return "Costo evocazione +1 questo turno";
+    case "blocco_evocazioni": return "Evocazioni bloccate per il turno";
+    case "fine_turno": return "Termina immediatamente il turno";
+    case "cimitero": return "Un tuo demone finisce nel cimitero";
+    case "scarta": return "Scarta 1 carta dalla mano";
+    case "limbo": return "Un demone va nel Limbo";
+    case "nulla": return "Nessun effetto";
+    case "conquista_immediata": return "Tenta una conquista immediata";
+    case "culto_agnello": return eff?.livello ? `Sacrifica un demone e pesca ${eff.livello} carte` : "Sacrifica un demone e pesca carte";
+    case "scarti_recuperati": return eff?.carta ? `Recupera ${eff.carta.nome} dagli scarti` : "Recupera una carta dagli scarti";
+    default: return "Effetto imprevisto";
+  }
+}
+
+function showImprevistoEffectBalloon(scene, text) {
+  if (!scene || !scene.add) return;
+  const padding = { x: 12, y: 8 };
+  const msg = scene.add.text(0, 0, text, {
+    font: "15px Arial",
+    fill: "#fff",
+  });
+  const w = msg.width + padding.x * 2;
+  const h = msg.height + padding.y * 2;
+  const bg = scene.add.graphics();
+  bg.fillStyle(0x000000, 0.85);
+  bg.fillRoundedRect(-w / 2, -h / 2, w, h, 14);
+  bg.lineStyle(2, 0xffda77, 0.9);
+  bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 14);
+  const y = 640;
+  const container = scene.add.container(625, y, [bg, msg]);
+  msg.setOrigin(0.5);
+  container.setDepth(5200);
+  scene.tweens.add({
+    targets: container,
+    alpha: 0,
+    duration: 1400,
+    delay: 1600,
+    ease: "Cubic.easeIn",
+    onComplete: () => { try { container.destroy(); } catch (_) {} },
   });
 }
 
@@ -4693,13 +4924,3 @@ function updateDiscardPileUI(scene) {
   const has = (gioco?.scarti?.length || 0) > 0;
   discardPileSprite.setTexture(has ? "discard_pile" : "discard_empty");
 }
-
-
-
-
-
-
-
-
-
-

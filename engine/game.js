@@ -617,6 +617,36 @@ export class Gioco {
       case nome.includes("colpo_di_fulmine"):
         res.effetto = "conquista_immediata";
         break;
+      case nome.includes("culto_dell'agnello"): {
+        const dem = (giocatore.cerchia || []).slice().sort((a,b)=> (a?.livello_stella||0)-(b?.livello_stella||0))[0];
+        if (dem) {
+          const lvl = dem.livello_stella || 0;
+          giocatore.cerchia.splice(giocatore.cerchia.indexOf(dem), 1);
+          this.cimitero.push(dem);
+          res.effetto = "culto_agnello";
+          res.sacrificato = dem;
+          res.livello = lvl;
+          for (let i = 0; i < lvl; i += 1) {
+            const c = this.mazzo_rifornimenti.pesca();
+            if (c) giocatore.mano.push(c);
+          }
+        } else {
+          res.effetto = "nulla";
+        }
+        break;
+      }
+      case nome.includes("novo_ordine_mentale"): {
+        const pick = [...this.scarti].sort((a,b)=> (b?.valore||0)-(a?.valore||0))[0];
+        if (pick) {
+          this.scarti.splice(this.scarti.lastIndexOf(pick), 1);
+          giocatore.mano.push(pick);
+          res.effetto = "scarti_recuperati";
+          res.carta = pick;
+        } else {
+          res.effetto = "nulla";
+        }
+        break;
+      }
       default:
         res.effetto = "non_gestito";
     }
