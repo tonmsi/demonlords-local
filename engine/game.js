@@ -151,6 +151,9 @@ export class Gioco {
     };
     const prevOffset = boss._offset || 0;
     const prevVals = { ...(boss.valori || {}) };
+
+    let requisito = boss.requisitoPer ? boss.requisitoPer(sig) : Infinity;
+    const stelle = player?.totale_stelle ?? 0;
     const sigAtt = sig;
     const stelleAtt = stelle;
 
@@ -165,11 +168,10 @@ export class Gioco {
       return r;
     };
 
-    let requisito = boss.requisitoPer ? boss.requisitoPer(sig) : Infinity;
-    const stelle = player?.totale_stelle ?? 0;
-
     const players = this.giocatori || [];
     const attackerIdx = Math.max(0, players.indexOf(player));
+
+    let lastStep = null;
 
     const tryStoppastella = async (rotator, step, beforeOffset, beforeVals) => {
       const reqBefore = computeReq(beforeVals, beforeOffset);
@@ -235,12 +237,21 @@ export class Gioco {
 
     const tryRotate = async (pl, step, card, desc, beforeOffset, beforeVals) => {
       if (step === null || step === undefined) return false;
+      const prevReq = requisito;
       this._rotateBoss(boss, step, pl);
+      lastStep = step;
       requisito = boss.requisitoPer(sig);
       this._consumeSpostastelle(pl, card, desc);
       // Stoppastella può annullare solo quest'ultima rotazione
       await tryStoppastella(pl, step, beforeOffset, beforeVals);
       requisito = boss.requisitoPer(sig);
+      this._log("spostastelle_turno", `${pl.nome} Spostastelle: ${prevReq} -> ${requisito}`, {
+        giocatore: pl.nome,
+        step,
+        before: prevReq,
+        after: requisito,
+      });
+      this._emit("spostastelle_rotazione", { giocatore: pl, step, before: prevReq, after: requisito });
       return true; // anche se stoppato, l'azione è stata tentata
     };
 
@@ -263,8 +274,24 @@ export class Gioco {
       return tryRotate(player, step, card, `Spostastelle attacco ${step}`, beforeOffset, beforeVals);
     };
 
+    const tryHumanDefender = async () => {
+      if (attackerIsHuman) return false;
+      const human = this.giocatori.find(p => p.nome === "Player" && !p.isBot);
+      if (!human || typeof this.askHumanSpostastelle !== "function") return false;
+      const choice = await this.askHumanSpostastelle({ boss, attacker: player, modo: "difesa", lastStep });
+      if (!choice || !choice.card) return false;
+      const step = choice.step;
+      const beforeOffset = boss._offset || 0;
+      const beforeVals = { ...(boss.valori || {}) };
+      return tryRotate(human, step, choice.card, `Spostastelle difesa ${step} da ${human.nome}`, beforeOffset, beforeVals);
+    };
+
     const tryDefenderSposta = async () => {
       const total = players.length || 0;
+      // Prima il giocatore umano, se non è l'attaccante
+      const humanUsed = await tryHumanDefender();
+      if (humanUsed) return true;
+
       for (let i = 1; i < total; i += 1) {
         const opp = players[(attackerIdx + i) % total];
         if (!opp || opp === player) continue;
@@ -292,13 +319,15 @@ export class Gioco {
         const used = await tryDefenderSposta();
         requisito = boss.requisitoPer(sig);
         ok = sig != null && stelle >= requisito;
-        if (!used) break; // nessun difensore ha risposto, conquista riuscita
+        if (used) continue; // qualcuno ha ruotato: ripeti il ciclo per consentire risposte
+        break; // nessun difensore ha risposto, conquista riuscita
       } else {
         // Attaccante non conquista: prova a usare Spostastelle per ridurre
         const used = await tryAttackerSposta();
         requisito = boss.requisitoPer(sig);
         ok = sig != null && stelle >= requisito;
-        if (!used) break; // nessuna carta per migliorare: fallisce
+        if (used) continue; // ruotato, ripeti ciclo
+        break; // nessuna carta per migliorare: fallisce
       }
     }
 
@@ -655,6 +684,13 @@ export class Gioco {
   scartaCarteDi(giocatore, carte) {
     const list = Array.isArray(carte) ? carte.filter(Boolean) : [];
     if (!list.length) return;
+    // Rimuovi anche dalla mano del giocatore (se presenti)
+    if (giocatore?.mano) {
+      list.forEach(c => {
+        const idx = giocatore.mano.indexOf(c);
+        if (idx >= 0) giocatore.mano.splice(idx, 1);
+      });
+    }
     this.scarti.unshift(...list);
     const count = list.length;
     const nome = giocatore?.nome || "Sistema";

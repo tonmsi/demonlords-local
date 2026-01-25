@@ -102,11 +102,15 @@ export class Giocatore {
       return 0;
     };
 
+    const includeBossMagic = !!this.isBot; // i bot possono usare anche spostastelle/stoppastella per pagare
     const energieGrezz = this.mano.filter(c => {
       const cat = (c?.categoria || "").toLowerCase();
-      // Usa energie e magie standard, evita le magie "azione_boss" (Spostastelle/Stoppastella) per non consumarle nei pagamenti
+      const isBossMagic = cat === "magia" && c?.azione_boss;
       const isMagic = cat === "magia" && !c?.azione_boss;
-      return cat === "energia" || isMagic;
+      // Usa energie e magie; per i bot consenti anche spostastelle/stoppastella quando serve pagare
+      if (cat === "energia" || isMagic) return true;
+      if (includeBossMagic && isBossMagic) return true;
+      return false;
     });
     if (!energieGrezz.length) return [];
 

@@ -1149,6 +1149,13 @@ async function startNewGame(scene) {
       gioco.addListener("scarti_prelevati", ({ giocatore, carte }) => {
         handleScartiPrelevati(scene, giocatore, carte);
       });
+      gioco.addListener("spostastelle_rotazione", ({ giocatore, step, before, after }) => {
+        const name = giocatore?.nome || "Bot";
+        const pos = botPositions[name] || { x: 625, y: 360 };
+        const msg = `${name} Spostastelle: ${before ?? "?"} -> ${after ?? "?"}`;
+        showBotBalloon(scene, name, msg, pos.x, pos.y, 0xFFD700);
+        pushLog(msg);
+      });
     }
     giocoPronto = true;
     syncHumanHand(scene);
@@ -1685,6 +1692,8 @@ async function handleDemoneEntrata(scene, giocatore, demone) {
     await azaelEffect(scene, giocatore);
   } else if (name.includes("hafgufa")) {
     await hafgufaEffect(scene, giocatore);
+  } else if (name.includes("tifone")) {
+    await tifoneEffect(scene, giocatore, demone);
   }
 }
 
@@ -2058,6 +2067,126 @@ async function hafgufaEffect(scene, giocatore) {
   if (!giocatore?.isBot) syncHumanHand(scene);
   updateDiscardPileUI(scene);
   refreshUI(scene);
+}
+
+async function tifoneEffect(scene, giocatore, demone) {
+  if (!gioco) return;
+  const pool = [];
+  (gioco.giocatori || []).forEach(p => {
+    (p.cerchia || []).forEach(d => {
+      if (d instanceof Demone && d !== demone) pool.push({ loc: "cerchia", owner: p, demone: d });
+    });
+  });
+  (gioco.limbo || []).forEach(d => {
+    if (d instanceof Demone && d !== demone) pool.push({ loc: "limbo", demone: d });
+  });
+  if (!pool.length) {
+    refreshUI(scene);
+    return;
+  }
+
+  let targetEntry = null;
+  if (giocatore?.isBot) {
+    const preferOpp = pool.filter(e => e.owner && e.owner !== giocatore);
+    const pickPool = preferOpp.length ? preferOpp : pool;
+    targetEntry = pickPool.slice().sort((a,b)=> (b.demone?.livello_stella||0)-(a.demone?.livello_stella||0))[0];
+  } else {
+    const choice = await openTifoneChoice(scene, pool.map(p => p.demone));
+    targetEntry = pool.find(p => p.demone === choice) || null;
+  }
+  if (!targetEntry) {
+    refreshUI(scene);
+    return;
+  }
+
+  const target = targetEntry.demone;
+  if (targetEntry.loc === "cerchia") {
+    const owner = targetEntry.owner;
+    if (owner && owner.cerchia.includes(target)) {
+      owner.cerchia.splice(owner.cerchia.indexOf(target), 1);
+      if (owner.nome === "Player") {
+        removeFromHumanCerchiaSprites(scene, target);
+      } else {
+        syncBotCerchiaSprites(scene);
+      }
+    }
+  } else if (targetEntry.loc === "limbo") {
+    removeDemoneFromLimbo(scene, target);
+  }
+  gioco.cimitero.push(target);
+  updateCemeteryUI(scene);
+  refreshUI(scene);
+}
+
+async function openTifoneChoice(scene, pool) {
+  return new Promise(resolve => {
+    if (!pool || !pool.length) return resolve(null);
+    modalOpen = true;
+    const depth = 6460;
+    const overlay = scene.add.rectangle(625, 360, 1250, 720, 0x000000, 0.45).setDepth(depth).setInteractive();
+    const panel = scene.add.rectangle(625, 360, 800, 320, 0x1f1f2e, 0.95)
+      .setDepth(depth + 1).setStrokeStyle(2, 0x888888);
+    const title = scene.add.text(625, 250, "Tifone: manda un demone al cimitero", {
+      font: "20px Arial",
+      fill: "#ffda77"
+    }).setOrigin(0.5).setDepth(depth + 2);
+
+    const cards = [];
+    let selected = pool[0];
+    const startX = 350;
+    const spacing = 120;
+    pool.forEach((d, i) => {
+      const cx = startX + i * spacing;
+      const cy = 360;
+      const frame = scene.add.rectangle(cx, cy, 100, 140, 0x333344, 0.85)
+        .setDepth(depth + 1)
+        .setStrokeStyle(2, 0x555577)
+        .setInteractive({ useHandCursor: true });
+      const tex = getTextureForCard(d, "demone");
+      const img = scene.add.image(cx, cy, tex).setScale(0.11).setDepth(depth + 2);
+      const name = scene.add.text(cx, cy + 80, truncateText(d.nome || "", 12), {
+        font: "12px Arial",
+        fill: "#fff"
+      }).setOrigin(0.5).setDepth(depth + 2);
+      frame.on("pointerdown", () => {
+        selected = d;
+        updateHighlight();
+      });
+      cards.push({ frame, img, name, model: d });
+    });
+
+    const updateHighlight = () => {
+      cards.forEach(c => {
+        const active = c.model === selected;
+        c.frame.setStrokeStyle(active ? 3 : 2, active ? 0xffaa44 : 0x555577);
+      });
+    };
+    updateHighlight();
+
+    const btnY = 470;
+    const confirm = scene.add.text(575, btnY, "Conferma", {
+      font: "16px Arial",
+      fill: "#fff",
+      backgroundColor: "#2a8c4f",
+      padding: { x: 12, y: 6 }
+    }).setOrigin(0.5).setDepth(depth + 2).setInteractive({ useHandCursor: true });
+    const cancel = scene.add.text(675, btnY, "Annulla", {
+      font: "16px Arial",
+      fill: "#fff",
+      backgroundColor: "#b84e5f",
+      padding: { x: 12, y: 6 }
+    }).setOrigin(0.5).setDepth(depth + 2).setInteractive({ useHandCursor: true });
+
+    const cleanup = (val) => {
+      modalOpen = false;
+      [overlay, panel, title, confirm, cancel, ...cards.flatMap(c => [c.frame, c.img, c.name])].forEach(o => { try { o.destroy(); } catch (_) {} });
+      resolve(val);
+    };
+
+    confirm.on("pointerdown", () => cleanup(selected));
+    cancel.on("pointerdown", () => cleanup(null));
+    overlay.on("pointerdown", () => cleanup(null));
+  });
 }
 
 async function jakalopeEffect(scene, giocatore) {
@@ -2947,9 +3076,9 @@ function addCardOverlay(scene, card, cartaModel, offset = 45) {
   }
 
   // Aggiungi stelle livello per demoni
-  if (cartaModel && (cartaModel.tipo === "Demone" || cartaModel instanceof Demone) && cartaModel.livello_stella > 0) {
+  if (cartaModel && (cartaModel.tipo === "Demone" || cartaModel instanceof Demone)) {
     card._levelStars = [];
-    const numStars = cartaModel.livello_stella;
+    const numStars = effectiveStarCount(cartaModel);
     for (let i = 0; i < numStars; i++) {
       if (scene.textures.exists("overlay_livello")) {
         const star = scene.add.image(card.x, card.y, "overlay_livello").setScale(0.12);
@@ -2991,8 +3120,53 @@ function syncElementOverlaysPosition(sprite) {
   });
 }
 
+function effectiveStarCount(model) {
+  if (!model) return 0;
+  const base = model._livello_override != null ? model._livello_override : (model.livello_stella || 0);
+  const bonus = model._bonus_stelle || 0;
+  return Math.max(0, base + bonus);
+}
+
+function rebuildLevelStars(scene, sprite) {
+  if (!sprite || !scene || !scene.textures.exists("overlay_livello")) return;
+  const model = sprite._model || sprite?.cartaModel || null;
+  const desired = effectiveStarCount(model);
+  const current = (sprite._levelStars || []).length;
+  if (desired === current) return;
+  try { sprite._levelStars?.forEach(star => star?.destroy()); } catch (_) {}
+  sprite._levelStars = [];
+  if (desired > 0) {
+    for (let i = 0; i < desired; i += 1) {
+      const star = scene.add.image(sprite.x, sprite.y, "overlay_livello").setScale(0.12);
+      star.setDepth(sprite.depth + 1);
+      sprite._levelStars.push(star);
+    }
+  }
+}
+
 function syncLevelStarsPosition(sprite) {
-  if (!sprite || !sprite._levelStars || !sprite._levelStars.length) return;
+  if (!sprite || !sprite.scene) return;
+  const scene = sprite.scene;
+  const model = sprite._model || sprite?.cartaModel || null;
+  const desired = (() => {
+    if (!model) return 0;
+    const base = model._livello_override != null ? model._livello_override : (model.livello_stella || 0);
+    const bonus = model._bonus_stelle || 0;
+    return Math.max(0, base + bonus);
+  })();
+  const current = (sprite._levelStars || []).length;
+  if (desired !== current) {
+    try { sprite._levelStars?.forEach(star => star?.destroy()); } catch (_) {}
+    sprite._levelStars = [];
+    if (desired > 0 && scene.textures.exists("overlay_livello")) {
+      for (let i = 0; i < desired; i += 1) {
+        const star = scene.add.image(sprite.x, sprite.y, "overlay_livello").setScale(0.12);
+        star.setDepth(sprite.depth + 1);
+        sprite._levelStars.push(star);
+      }
+    }
+  }
+  if (!sprite._levelStars || !sprite._levelStars.length) return;
   const cardBounds = sprite.getBounds();
   const totalStars = sprite._levelStars.length;
   const starWidth = 10; // Approximate width at scale 0.12
@@ -3154,6 +3328,7 @@ async function playMagicCard(scene, card) {
   delete model._rotationChoice;
   if (res?.ok) {
     removePaidFromHand(scene, [model]);
+    showBotBalloon(scene, "Player", `Player usa ${model.nome}`, 625, 600, 0x1e90ff);
     showBotBalloon(scene, "Player", `Gioca ${model.nome} • ${res.effetto || "Effetto attivato"}`, 625, 600);
     await maybeHandleIlluminazione(scene, giocatore, model);
     if (gioco.completeAction) gioco.completeAction(true);
@@ -3849,23 +4024,9 @@ function layoutHumanCerchia(scene) {
     if (sprite._hoverRect) {
       sprite._hoverRect.setPosition(targetX, targetY);
     }
-    if (sprite._levelStars && sprite._levelStars.length) {
-      const cardBounds = sprite.getBounds();
-      const totalStars = sprite._levelStars.length;
-      const starWidth = 10;
-      const starSpacing = 2;
-      const totalWidth = (totalStars * starWidth) + ((totalStars - 1) * starSpacing);
-      const startOffsetX = -totalWidth / 2;
-      const offsetY = cardBounds.height / 2 - 21 - 20;
-      sprite._levelStars.forEach((star, starIdx) => {
-        if (star && star.active) {
-          star.setPosition(
-            targetX + startOffsetX + (starIdx * (starWidth + starSpacing)),
-            targetY + offsetY
-          );
-        }
-      });
-    }
+    sprite._isHumanCerchia = true;
+    rebuildLevelStars(scene, sprite);
+    syncLevelStarsPosition(sprite);
   });
 }
 
@@ -3919,6 +4080,10 @@ function syncLimboSprites(scene) {
   });
 
   limboSprites = newSprites;
+  limboSprites.forEach(s => {
+    rebuildLevelStars(scene, s);
+    syncLevelStarsPosition(s);
+  });
   layoutLimboSprites(scene);
 }
 
@@ -4339,6 +4504,22 @@ function handleScartaEvent(scene, giocatore, carte = []) {
   refreshUI(scene);
 }
 
+async function maybeSendJinnToLimbo(scene, giocatore) {
+  if (!giocatore) return;
+  const jinn = (giocatore.cerchia || []).find(d => (d?.nome || "").toLowerCase().includes("jinn"));
+  if (!jinn) return;
+  const idx = giocatore.cerchia.indexOf(jinn);
+  if (idx >= 0) giocatore.cerchia.splice(idx, 1);
+  if (!gioco.limbo.includes(jinn)) gioco.limbo.push(jinn);
+  if (giocatore.nome === "Player") {
+    removeFromHumanCerchiaSprites(scene, jinn);
+  } else {
+    syncBotCerchiaSprites(scene);
+  }
+  placeInLimbo(scene, jinn);
+  refreshUI(scene);
+}
+
 // 🔧 FIX REQUEST:
 // When a demon card is summoned to the player's circle (like "Boto Cor de Rosa"),
 // it appears in the wrong position or duplicates on screen.
@@ -4679,6 +4860,7 @@ async function advanceTurn(scene) {
   const prev = gioco.giocatoreCorrente();
   // Limite mano 6 carte a fine turno
   await enforceHandLimit(scene, prev);
+   await maybeSendJinnToLimbo(scene, prev);
   gioco._orias_block = false;
   gioco.prossimoTurno();
   if (asmodeoSwaps.length) revertAsmodeoSwaps(scene, prev);
@@ -4690,6 +4872,7 @@ async function advanceTurn(scene) {
     await runBotTurn(scene, current);
     gioco.prossimoTurno();
     await enforceHandLimit(scene, current); // controllo limite mano anche per bot a fine turno
+     await maybeSendJinnToLimbo(scene, current);
     refreshUI(scene);
     current = gioco.giocatoreCorrente();
     showBotBalloon(scene, current.nome, "Nuovo turno", 625, 80);
@@ -4754,6 +4937,10 @@ function decideBotActionV2(bot) {
 
   const energyCount = (bot.mano || []).filter(c => (c?.categoria || "").toLowerCase() === "energia").length;
   const playableMagic = pickBestBotMagic(bot);
+  const handSize = (bot.mano || []).length;
+  const magicLike = (bot.mano || []).filter(c => (c?.categoria || "").toLowerCase() === "magia");
+  const bossMagics = (bot.mano || []).filter(c => !!c?.azione_boss);
+  const magicPressure = handSize >= 5 && (magicLike.length + bossMagics.length) >= Math.max(3, Math.ceil(handSize * 0.5));
 
   const payLimbo = findAffordableLimbo(bot);
   if (payLimbo && actionNum <= 2) {
@@ -4765,10 +4952,12 @@ function decideBotActionV2(bot) {
   }
 
   if (actionNum === 1) {
+    if (magicPressure) return { tipo: "rivela_evocazione" };
     if (energyCount < 3) return { tipo: "pesca_rifornimento" };
     return { tipo: "rivela_evocazione" };
   }
 
+  if (magicPressure) return { tipo: "rivela_evocazione" };
   if (energyCount < 2) return { tipo: "pesca_rifornimento" };
   return { tipo: "rivela_evocazione" };
 }
@@ -4862,10 +5051,8 @@ async function performBotAction(scene, bot, azione) {
       if (gioco.onAzione && res?.ok) gioco.onAzione(bot.nome, `Gioca magia ${azione.carta?.nome || ""}`);
       if (res?.ok) {
         const name = (azione.carta?.nome || "").toLowerCase();
-        if (name.includes("spostastelle") || name.includes("sposta stelle")) {
-          const pos = botPositions[bot.nome] || { x: 625, y: 360 };
-          showBotBalloon(scene, bot.nome, `${bot.nome} usa Spostastelle`, pos.x, pos.y);
-        }
+        const pos = botPositions[bot.nome] || { x: 625, y: 360 };
+        showBotBalloon(scene, bot.nome, `${bot.nome} usa ${azione.carta?.nome || "una magia"}`, pos.x, pos.y, 0x1e90ff);
         if (name.includes("illuminazione")) {
           await maybeHandleIlluminazione(scene, bot, azione.carta);
         }
@@ -5149,22 +5336,15 @@ function animateBotEvocaDemone(scene, bot, demone) {
       });
     }
 
+    rebuildLevelStars(scene, card);
+    syncLevelStarsPosition(card);
     if (card._levelStars && card._levelStars.length) {
-      syncLevelStarsPosition(card);
-      const cardBounds = card.getBounds();
-      const totalStars = card._levelStars.length;
-      const starWidth = 10;
-      const starSpacing = 2;
-      const totalWidth = (totalStars * starWidth) + ((totalStars - 1) * starSpacing);
-      const startOffsetX = -totalWidth / 2;
-      const offsetY = cardBounds.height / 2 - 21;
-      
-      card._levelStars.forEach((star, starIdx) => {
+      card._levelStars.forEach((star) => {
         if (star && star.active) {
           scene.tweens.add({
             targets: star,
-            x: finalX + startOffsetX + (starIdx * (starWidth + starSpacing)),
-            y: finalY + offsetY,
+            x: star.x,
+            y: star.y,
             duration: 600,
             ease: "Cubic.easeOut",
           });
