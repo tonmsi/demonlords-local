@@ -402,6 +402,43 @@ export class Gioco {
     };
 
     switch (nome) {
+      case "abracadabra": {
+        const myDemons = (giocatore.cerchia || []).filter(d => d instanceof Demone);
+        const oppDemonsWithOwner = () => {
+          return (bots || []).flatMap(b => (b.cerchia || []).map(d => ({ b, d })));
+        };
+        const oppDemons = oppDemonsWithOwner();
+        if (!myDemons.length || !oppDemons.length) return "Nessun demone da scambiare";
+
+        const swap = async () => {
+          const pickForBot = () => {
+            const my = myDemons.slice().sort((a,b)=> (b.livello_stella||0)-(a.livello_stella||0))[0];
+            const target = oppDemons.find(o => o.d.livello_stella === my.livello_stella);
+            return my && target ? { mine: my, target } : null;
+          };
+          if (giocatore.isBot || !this.askAbracadabraChoice) {
+            return pickForBot();
+          }
+          try {
+            const res = await this.askAbracadabraChoice({ myDemons, oppDemons });
+            if (res && res.mine && res.target && res.target.d) return res;
+          } catch (_) {}
+          return pickForBot();
+        };
+
+        const choice = await swap();
+        if (!choice || !choice.mine || !choice.target) return "Nessun scambio";
+        if (choice.mine.livello_stella !== choice.target.d.livello_stella) return "Livello diverso";
+        const oppOwner = choice.target.b;
+
+        giocatore.cerchia.splice(giocatore.cerchia.indexOf(choice.mine),1);
+        oppOwner.cerchia.splice(oppOwner.cerchia.indexOf(choice.target.d),1);
+        giocatore.cerchia.push(choice.target.d);
+        oppOwner.cerchia.push(choice.mine);
+
+        this._emit("abracadabra_swap", { giocatore, mio: choice.mine, opp: choice.target.d, opponent: oppOwner });
+        return `Scambia ${choice.mine.nome} con ${choice.target.d.nome}`;
+      }
       case "patto": {
         const opp = pickOpponentWithMostCards();
         if (opp) {
@@ -498,16 +535,38 @@ export class Gioco {
         return `Rivela ${reveal.length} rifornimenti, tiene 2`;
       }
       case "abracadabra": {
-        const myDem = (giocatore.cerchia || []).sort((a,b)=> (b.livello_stella||0)-(a.livello_stella||0))[0];
-        const target = pickOpponentWithStrongestDemon();
-        if (!myDem || !target) return "Nessun demone da scambiare";
-        const oppDem = target.d;
-        if (myDem.livello_stella !== oppDem.livello_stella) return "Nessun demone stesso livello";
-        giocatore.cerchia.splice(giocatore.cerchia.indexOf(myDem),1);
-        target.b.cerchia.splice(target.b.cerchia.indexOf(oppDem),1);
-        giocatore.cerchia.push(oppDem);
-        target.b.cerchia.push(myDem);
-        return `Scambia ${myDem.nome} con ${oppDem.nome}`;
+        const myDemons = (giocatore.cerchia || []).filter(d => d instanceof Demone);
+        const oppDemons = oppDemonsWithOwner();
+        if (!myDemons.length || !oppDemons.length) return "Nessun demone da scambiare";
+
+        const swap = async () => {
+          const pickForBot = () => {
+            const my = myDemons.slice().sort((a,b)=> (b.livello_stella||0)-(a.livello_stella||0))[0];
+            const target = oppDemons.find(o => o.d.livello_stella === my.livello_stella);
+            return my && target ? { mine: my, target } : null;
+          };
+          if (giocatore.isBot || !this.askAbracadabraChoice) {
+            return pickForBot();
+          }
+          try {
+            const res = await this.askAbracadabraChoice({ myDemons, oppDemons });
+            if (res && res.mine && res.target && res.target.d) return res;
+          } catch (_) {}
+          return pickForBot();
+        };
+
+        const choice = await swap();
+        if (!choice || !choice.mine || !choice.target) return "Nessun scambio";
+        if (choice.mine.livello_stella !== choice.target.d.livello_stella) return "Livello diverso";
+        const oppOwner = choice.target.b;
+
+        giocatore.cerchia.splice(giocatore.cerchia.indexOf(choice.mine),1);
+        oppOwner.cerchia.splice(oppOwner.cerchia.indexOf(choice.target.d),1);
+        giocatore.cerchia.push(choice.target.d);
+        oppOwner.cerchia.push(choice.mine);
+
+        this._emit("abracadabra_swap", { giocatore, mio: choice.mine, opp: choice.target.d, opponent: oppOwner });
+        return `Scambia ${choice.mine.nome} con ${choice.target.d.nome}`;
       }
       case "illuminazione": {
         return "Illuminazione: replica l'effetto di un tuo demone";

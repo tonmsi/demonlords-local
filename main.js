@@ -1108,6 +1108,8 @@ async function startNewGame(scene) {
     }
     applySigilliConfig(g);
     gioco = g;
+    gioco.askHumanSpostastelle = (ctx) => askHumanSpostaDuringConquest(scene, ctx);
+    gioco.askAbracadabraChoice = (ctx) => openAbracadabraChoice(scene, ctx);
     gioco.azioni_per_turno = 2;
     gioco.fase = "turno";
     // popola log iniziale
@@ -1155,6 +1157,21 @@ async function startNewGame(scene) {
         const msg = `${name} Spostastelle: ${before ?? "?"} -> ${after ?? "?"}`;
         showBotBalloon(scene, name, msg, pos.x, pos.y, 0xFFD700);
         pushLog(msg);
+      });
+      gioco.addListener("abracadabra_swap", ({ giocatore, mio, opp, opponent }) => {
+        const receiver = giocatore;
+        const giver = opponent;
+        if (receiver?.nome === "Player") {
+          removeFromHumanCerchiaSprites(scene, mio);
+          addCerchiaSprite(scene, opp, receiver);
+          handleDemoneEntrata(scene, receiver, opp);
+        } else if (giver?.nome === "Player") {
+          removeFromHumanCerchiaSprites(scene, opp);
+          addCerchiaSprite(scene, mio, giver);
+        } else {
+          syncBotCerchiaSprites(scene);
+        }
+        refreshUI(scene);
       });
     }
     giocoPronto = true;
@@ -2662,6 +2679,119 @@ async function openBabiChoice(scene, pool) {
     };
 
     confirm.on("pointerdown", () => cleanup(selected));
+    cancel.on("pointerdown", () => cleanup(null));
+    overlay.on("pointerdown", () => cleanup(null));
+  });
+}
+
+async function openAbracadabraChoice(scene, ctx = {}) {
+  const myDemons = ctx?.myDemons || [];
+  const oppDemons = ctx?.oppDemons || [];
+  return new Promise(resolve => {
+    if (!myDemons.length || !oppDemons.length) return resolve(null);
+    modalOpen = true;
+    const depth = 6450;
+    const overlay = scene.add.rectangle(625, 360, 1250, 720, 0x000000, 0.45).setDepth(depth).setInteractive();
+    const panel = scene.add.rectangle(625, 360, 920, 380, 0x1f1f2e, 0.95)
+      .setDepth(depth + 1).setStrokeStyle(2, 0x888888);
+    const title = scene.add.text(625, 210, "Abracadabra: scegli i demoni da scambiare", {
+      font: "20px Arial",
+      fill: "#ffda77"
+    }).setOrigin(0.5).setDepth(depth + 2);
+
+    let selectedMine = myDemons[0] || null;
+    let selectedOpp = null;
+
+    const startXLeft = 260;
+    const startXRight = 610;
+    const startY = 300;
+    const spacing = 110;
+    const renderCards = (list, startX, startYBase, isOpp) => {
+      const sprites = [];
+      list.forEach((item, i) => {
+        const model = isOpp ? item.d : item;
+        const cx = startX + i * spacing;
+        const cy = startYBase;
+        const frame = scene.add.rectangle(cx, cy, 100, 140, 0x333344, 0.85)
+          .setDepth(depth + 1)
+          .setStrokeStyle(2, 0x555577)
+          .setInteractive({ useHandCursor: true });
+        const tex = getTextureForCard(model, "demone");
+        const img = scene.add.image(cx, cy, tex).setScale(0.11).setDepth(depth + 2);
+        const name = scene.add.text(cx, cy + 80, truncateText(model.nome || "", 12), {
+          font: "12px Arial",
+          fill: "#fff"
+        }).setOrigin(0.5).setDepth(depth + 2);
+
+        const level = scene.add.text(cx, cy - 80, `Lv ${model.livello_stella || 0}`, {
+          font: "11px Arial",
+          fill: "#ffda77"
+        }).setOrigin(0.5).setDepth(depth + 2);
+
+        const select = () => {
+          if (isOpp) {
+            selectedOpp = item;
+          } else {
+            selectedMine = model;
+            // reset opp if level mismatch
+            if (selectedOpp && selectedOpp.d.livello_stella !== selectedMine.livello_stella) {
+              selectedOpp = null;
+            }
+          }
+          updateHighlight();
+        };
+        frame.on("pointerdown", select);
+        img.on("pointerdown", select);
+
+        sprites.push({ frame, img, name, level, model, raw: item, isOpp });
+      });
+      return sprites;
+    };
+
+    const leftSprites = renderCards(myDemons, startXLeft, startY, false);
+    const rightSprites = renderCards(oppDemons, startXRight, startY, true);
+
+    const updateHighlight = () => {
+      leftSprites.forEach(s => {
+        const active = selectedMine === s.model;
+        s.frame.setStrokeStyle(active ? 3 : 2, active ? 0xffaa44 : 0x555577);
+      });
+      rightSprites.forEach(s => {
+        const sameLevel = selectedMine ? s.model.livello_stella === selectedMine.livello_stella : false;
+        const active = selectedOpp === s.raw;
+        s.frame.setAlpha(sameLevel ? 1 : 0.35);
+        s.img.setAlpha(sameLevel ? 1 : 0.35);
+        s.name.setAlpha(sameLevel ? 1 : 0.35);
+        s.level.setAlpha(sameLevel ? 1 : 0.35);
+        s.frame.setStrokeStyle(active ? 3 : 2, active ? 0xffaa44 : 0x555577);
+      });
+    };
+    updateHighlight();
+
+    const confirm = scene.add.text(575, 500, "Conferma", {
+      font: "16px Arial",
+      fill: "#fff",
+      backgroundColor: "#2a8c4f",
+      padding: { x: 12, y: 6 }
+    }).setOrigin(0.5).setDepth(depth + 2).setInteractive({ useHandCursor: true });
+    const cancel = scene.add.text(675, 500, "Annulla", {
+      font: "16px Arial",
+      fill: "#fff",
+      backgroundColor: "#b84e5f",
+      padding: { x: 12, y: 6 }
+    }).setOrigin(0.5).setDepth(depth + 2).setInteractive({ useHandCursor: true });
+
+    const cleanup = (val) => {
+      modalOpen = false;
+      [overlay, panel, title, confirm, cancel, ...leftSprites.flatMap(s => [s.frame, s.img, s.name, s.level]), ...rightSprites.flatMap(s => [s.frame, s.img, s.name, s.level])].forEach(o => { try { o.destroy(); } catch (_) {} });
+      resolve(val);
+    };
+
+    confirm.on("pointerdown", () => {
+      if (!selectedMine) return;
+      if (!selectedOpp) return;
+      cleanup({ mine: selectedMine, target: selectedOpp });
+    });
     cancel.on("pointerdown", () => cleanup(null));
     overlay.on("pointerdown", () => cleanup(null));
   });
