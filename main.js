@@ -1121,7 +1121,8 @@ async function startNewGame(scene) {
         } else if (entry?.type === "spostastelle" || entry?.type === "stoppastella") {
           const nome = entry?.detail?.giocatore || entry?.message?.split?.(" ")?.[0] || "Bot";
           const pos = botPositions[nome] || { x: 625, y: 360 };
-          showBotBalloon(scene, nome, entry.message || entry.type, pos.x, pos.y);
+          const border = entry?.type === "spostastelle" && nome !== "Player" ? 0xffd700 : 0xffffff;
+          showBotBalloon(scene, nome, entry.message || entry.type, pos.x, pos.y, border);
         }
       });
       gioco.addListener("pesca_rifornimento", ({ giocatore, carta }) => {
@@ -1344,6 +1345,23 @@ async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
     // assicurati che la mano UI sia allineata allo stato di gioco
     syncHumanHand(scene);
 
+    const buildPaymentTooltip = (model) => {
+      if (!model) return "";
+      const lines = [];
+      if (model.nome) lines.push(model.nome);
+      const tipo = Array.isArray(model.tipi) ? model.tipi.join(", ") : (model.tipo || "");
+      if (tipo) lines.push(`Tipo: ${tipo}`);
+      if (model.valore != null) lines.push(`Valore: ${model.valore}`);
+      if (model.livello_stella != null && model.livello_stella !== "") lines.push(`Livello: ${model.livello_stella}`);
+      if (model.costo != null) {
+        const req = model.costo_tipo ? ` (min ${model.costo_tipo_minimo || 0} ${model.costo_tipo})` : "";
+        lines.push(`Costo: ${model.costo}${req}`);
+      }
+      const descr = model.descrizione || model.effetto || "";
+      if (descr) lines.push(`Effetto: ${descr}`);
+      return lines.join("\n");
+    };
+
     const reqTipo = demone?.costo_tipo || null;
     const reqMin = demone?.costo_tipo_minimo || 0;
     const energie = (giocatore?.mano || []).filter(c => {
@@ -1407,10 +1425,10 @@ async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
     }).setDepth(depth + 2);
 
     // === CARTE ENERGIA IN MANO ===
-    const cardEntries = [];
-    const startX = 520, startY = 240;
-    const spacingX = 120, spacingY = 130;
-    const perRow = 4;
+  const cardEntries = [];
+  const startX = 520, startY = 240;
+  const spacingX = 120, spacingY = 130;
+  const perRow = 4;
 
     energie.forEach((model, idx) => {
       const col = idx % perRow;
@@ -1455,6 +1473,8 @@ async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
       const elementIcon = elementKey && scene.textures.exists(`overlay_tipo_${elementKey}`)
         ? scene.add.image(cx + 28, cy + 53, `overlay_tipo_${elementKey}`).setScale(0.18).setDepth(depth + 3)
         : null;
+
+      attachTooltip(img, () => buildPaymentTooltip(model));
 
       const select = () => {
         if (selected.has(model)) {
@@ -1806,17 +1826,29 @@ async function golemEffect(scene, giocatore) {
   }
   const hasAria = pescate.some(c => (c?.tipi || []).includes("ENERGIA_ARIA") || c?.tipo === "ENERGIA_ARIA");
   if (hasAria) {
-    // deve scartare 1 carta: per bot/scelta semplice, scarta la minore
-    const cartaDaScartare = pickLowestEnergyOrAny(giocatore.mano);
-    if (cartaDaScartare) {
-      const idx = giocatore.mano.indexOf(cartaDaScartare);
-      if (idx >= 0) giocatore.mano.splice(idx, 1);
-      gioco.scartaCarteDi(giocatore, [cartaDaScartare]);
-      if (!giocatore?.isBot) {
-        removePaidFromHand(scene, [cartaDaScartare]);
-      } else {
+    if (giocatore?.isBot) {
+      const cartaDaScartare = pickLowestEnergyOrAny(giocatore.mano);
+      if (cartaDaScartare) {
+        const idx = giocatore.mano.indexOf(cartaDaScartare);
+        if (idx >= 0) giocatore.mano.splice(idx, 1);
+        gioco.scartaCarteDi(giocatore, [cartaDaScartare]);
         animateBotDiscard(scene, giocatore.nome, 1);
       }
+    } else {
+      const chosen = await openHandDiscardDialog(scene, giocatore, 1, {
+        title: "Golem: scarta 1 carta",
+        info: "Scegli la carta da scartare",
+      });
+      if (!chosen || !chosen.length) {
+        const cartaDaScartare = pickLowestEnergyOrAny(giocatore.mano);
+        if (cartaDaScartare) {
+          const idx = giocatore.mano.indexOf(cartaDaScartare);
+          if (idx >= 0) giocatore.mano.splice(idx, 1);
+          gioco.scartaCarteDi(giocatore, [cartaDaScartare]);
+          removePaidFromHand(scene, [cartaDaScartare]);
+        }
+      }
+      syncHumanHand(scene);
     }
   }
   if (!giocatore?.isBot) syncHumanHand(scene);
@@ -1828,17 +1860,28 @@ async function keukegenEffect(scene, giocatore) {
   const c = gioco.pescaRifornimento(giocatore);
   if (c && !giocatore?.isBot) addCardToHand(scene, c, { silent: true });
   const cartaDaScartare = pickLowestEnergyOrAny(giocatore.mano);
-  if (cartaDaScartare) {
-    const idx = giocatore.mano.indexOf(cartaDaScartare);
-    if (idx >= 0) giocatore.mano.splice(idx, 1);
-    gioco.scartaCarteDi(giocatore, [cartaDaScartare]);
-    if (giocatore?.isBot) {
+  if (giocatore?.isBot) {
+    if (cartaDaScartare) {
+      const idx = giocatore.mano.indexOf(cartaDaScartare);
+      if (idx >= 0) giocatore.mano.splice(idx, 1);
+      gioco.scartaCarteDi(giocatore, [cartaDaScartare]);
       animateBotDiscard(scene, giocatore.nome, 1);
-    } else {
-      removePaidFromHand(scene, [cartaDaScartare]);
     }
+  } else {
+    const chosen = await openHandDiscardDialog(scene, giocatore, 1, {
+      title: "Keukegen: scarta 1 carta",
+      info: "Scegli la carta da scartare",
+    });
+    if (!chosen || !chosen.length) {
+      if (cartaDaScartare) {
+        const idx = giocatore.mano.indexOf(cartaDaScartare);
+        if (idx >= 0) giocatore.mano.splice(idx, 1);
+        gioco.scartaCarteDi(giocatore, [cartaDaScartare]);
+        removePaidFromHand(scene, [cartaDaScartare]);
+      }
+    }
+    syncHumanHand(scene);
   }
-  if (!giocatore?.isBot) syncHumanHand(scene);
   refreshUI(scene);
 }
 
@@ -1849,17 +1892,28 @@ async function glatisantEffect(scene, giocatore) {
     if (c && !giocatore?.isBot) addCardToHand(scene, c, { silent: true });
   }
   const cartaDaScartare = pickLowestEnergyOrAny(giocatore.mano);
-  if (cartaDaScartare) {
-    const idx = giocatore.mano.indexOf(cartaDaScartare);
-    if (idx >= 0) giocatore.mano.splice(idx, 1);
-    gioco.scartaCarteDi(giocatore, [cartaDaScartare]);
-    if (giocatore?.isBot) {
+  if (giocatore?.isBot) {
+    if (cartaDaScartare) {
+      const idx = giocatore.mano.indexOf(cartaDaScartare);
+      if (idx >= 0) giocatore.mano.splice(idx, 1);
+      gioco.scartaCarteDi(giocatore, [cartaDaScartare]);
       animateBotDiscard(scene, giocatore.nome, 1);
-    } else {
-      removePaidFromHand(scene, [cartaDaScartare]);
     }
+  } else {
+    const chosen = await openHandDiscardDialog(scene, giocatore, 1, {
+      title: "Glatisant: scarta 1 carta",
+      info: "Scegli la carta da scartare",
+    });
+    if (!chosen || !chosen.length) {
+      if (cartaDaScartare) {
+        const idx = giocatore.mano.indexOf(cartaDaScartare);
+        if (idx >= 0) giocatore.mano.splice(idx, 1);
+        gioco.scartaCarteDi(giocatore, [cartaDaScartare]);
+        removePaidFromHand(scene, [cartaDaScartare]);
+      }
+    }
+    syncHumanHand(scene);
   }
-  if (!giocatore?.isBot) syncHumanHand(scene);
   refreshUI(scene);
 }
 
@@ -2012,12 +2066,33 @@ async function humbabaEffect(scene, giocatore) {
 
 async function windigoEffect(scene, giocatore, demone) {
   // Puoi mandare un tuo demone al cimitero per +livello a Windigo
-  const candidate = (giocatore?.cerchia || []).find(d => d !== demone);
-  if (candidate) {
-    const idx = giocatore.cerchia.indexOf(candidate);
-    if (idx >= 0) giocatore.cerchia.splice(idx, 1);
-    gioco.cimitero.push(candidate);
-    demone._bonus_stelle = (demone._bonus_stelle || 0) +  (candidate.livello_stella || 1);
+  const altri = (giocatore?.cerchia || []).filter(d => d !== demone);
+  if (!altri.length) {
+    refreshUI(scene);
+    return;
+  }
+
+  let candidate = null;
+  if (giocatore?.isBot) {
+    candidate = altri.slice().sort((a,b)=> (b.livello_stella||0)-(a.livello_stella||0))[0];
+  } else {
+    candidate = await openWindigoSacrificeDialog(scene, altri);
+  }
+  if (!candidate) {
+    refreshUI(scene);
+    return;
+  }
+
+  const idx = giocatore.cerchia.indexOf(candidate);
+  if (idx >= 0) giocatore.cerchia.splice(idx, 1);
+  gioco.cimitero.push(candidate);
+  demone._bonus_stelle = (demone._bonus_stelle || 0) + (candidate.livello_stella || 1);
+
+  if (giocatore?.isBot) {
+    syncBotCerchiaSprites(scene);
+  } else {
+    removeFromHumanCerchiaSprites(scene, candidate);
+    syncHumanHand(scene);
   }
   refreshUI(scene);
 }
@@ -2072,12 +2147,26 @@ async function kappaEffect(scene, giocatore) {
 
 async function lilithEffect(scene, giocatore) {
   const cartaDaScartare = pickLowestEnergyOrAny(giocatore.mano);
-  if (cartaDaScartare) {
-    const idx = giocatore.mano.indexOf(cartaDaScartare);
-    if (idx >= 0) giocatore.mano.splice(idx, 1);
-    gioco.scartaCarteDi(giocatore, [cartaDaScartare]);
-    if (giocatore?.isBot) animateBotDiscard(scene, giocatore.nome, 1);
-    else removePaidFromHand(scene, [cartaDaScartare]);
+  if (giocatore?.isBot) {
+    if (cartaDaScartare) {
+      const idx = giocatore.mano.indexOf(cartaDaScartare);
+      if (idx >= 0) giocatore.mano.splice(idx, 1);
+      gioco.scartaCarteDi(giocatore, [cartaDaScartare]);
+      animateBotDiscard(scene, giocatore.nome, 1);
+    }
+  } else {
+    const chosen = await openHandDiscardDialog(scene, giocatore, 1, {
+      title: "Lilith: scarta 1 carta",
+      info: "Scegli la carta da scartare",
+    });
+    if (!chosen || !chosen.length) {
+      if (cartaDaScartare) {
+        const idx = giocatore.mano.indexOf(cartaDaScartare);
+        if (idx >= 0) giocatore.mano.splice(idx, 1);
+        gioco.scartaCarteDi(giocatore, [cartaDaScartare]);
+        removePaidFromHand(scene, [cartaDaScartare]);
+      }
+    }
   }
   const opponents = (gioco?.giocatori || []).filter(p => p !== giocatore);
   const target = opponents.map(p => ({ p, d: (p.cerchia || []).slice().sort((a,b)=> (b.livello_stella||0)-(a.livello_stella||0))[0] || null }))
@@ -2992,7 +3081,10 @@ async function maybeUseHumanSpostastelle(scene, modo = "difesa") {
   const sposte = (player.mano || []).filter(c => c?.azione_boss?.rotazione);
   if (!sposte.length) return;
   const choice = await openSpostaDialog(scene, boss, attacker, sposte, modo);
-  if (!choice) return;
+  if (!choice) {
+    player._skipSpostaThisConquest = true; // evita consumo automatico in conquistaBoss
+    return;
+  }
   const { card, step } = choice;
   if (step != null) card._rotationChoice = step;
   const res = gioco.giocaMagia(player, card);
@@ -3101,7 +3193,7 @@ async function enforceHandLimit(scene, giocatore) {
   refreshUI(scene);
 }
 
-function openHandDiscardDialog(scene, giocatore, extra) {
+function openHandDiscardDialog(scene, giocatore, extra, options = {}) {
   return new Promise(resolve => {
     modalOpen = true;
     const depth = 4200;
@@ -3111,11 +3203,13 @@ function openHandDiscardDialog(scene, giocatore, extra) {
     const panel = scene.add.rectangle(675, 360, 900, 380, 0x1f1f1f, 0.95)
       .setDepth(depth + 1)
       .setStrokeStyle(2, 0x888888);
-    const title = scene.add.text(675, 200, `Scarta ${extra} carta/e (limite 6)`, {
+    const titleText = options.title || `Scarta ${extra} carta/e (limite 6)`;
+    const infoText = options.info || "Seleziona le carte da scartare";
+    const title = scene.add.text(675, 200, titleText, {
       font: "22px Arial",
       fill: "#ffda77"
     }).setOrigin(0.5).setDepth(depth + 2);
-    const info = scene.add.text(675, 230, "Seleziona le carte da scartare", {
+    const info = scene.add.text(675, 230, infoText, {
       font: "14px Arial",
       fill: "#ddd"
     }).setOrigin(0.5).setDepth(depth + 2);
@@ -3181,11 +3275,12 @@ function openHandDiscardDialog(scene, giocatore, extra) {
       padding: { x: 12, y: 6 }
     }).setDepth(depth + 2).setInteractive({ useHandCursor: true });
 
-    const cleanup = () => {
+    const cleanup = (val) => {
       [overlay, panel, title, info, confirm, cancel, ...cards.flatMap(c => [c.frame, c.img, c.name])].forEach(o => {
         try { o.destroy(); } catch (_) {}
       });
       modalOpen = false;
+      resolve(val);
     };
 
     confirm.on("pointerdown", () => {
@@ -3196,13 +3291,84 @@ function openHandDiscardDialog(scene, giocatore, extra) {
       updateDiscardPileUI(scene);
       syncHumanHand(scene);
       refreshUI(scene);
-      cleanup();
-      resolve();
+      cleanup(toDiscard);
     });
 
-    cancel.on("pointerdown", () => { cleanup(); resolve(); });
-    overlay.on("pointerdown", () => { cleanup(); resolve(); });
+    cancel.on("pointerdown", () => { cleanup(null); });
+    overlay.on("pointerdown", () => { cleanup(null); });
     updateSelected();
+  });
+}
+
+async function openWindigoSacrificeDialog(scene, demoni) {
+  return new Promise(resolve => {
+    modalOpen = true;
+    const depth = 6450;
+    const overlay = scene.add.rectangle(625, 360, 1250, 720, 0x000000, 0.45).setDepth(depth).setInteractive();
+    const panel = scene.add.rectangle(625, 360, 820, 320, 0x1f1f2e, 0.95)
+      .setDepth(depth + 1).setStrokeStyle(2, 0x888888);
+    const title = scene.add.text(625, 250, "Windigo: sacrifica un tuo demone (opzionale)", {
+      font: "20px Arial",
+      fill: "#ffda77"
+    }).setOrigin(0.5).setDepth(depth + 2);
+
+    const startX = 320;
+    const spacing = 120;
+    const cards = [];
+    let selected = null;
+    demoni.forEach((d, i) => {
+      const cx = startX + i * spacing;
+      const cy = 360;
+      const frame = scene.add.rectangle(cx, cy, 110, 150, 0x333344, 0.85)
+        .setDepth(depth + 1)
+        .setStrokeStyle(2, 0x555577)
+        .setInteractive({ useHandCursor: true });
+      const tex = getTextureForCard(d, "demone");
+      const img = scene.add.image(cx, cy, tex).setScale(0.12).setDepth(depth + 2);
+      const name = scene.add.text(cx, cy + 90, truncateText(d.nome || "", 12), {
+        font: "13px Arial",
+        fill: "#fff"
+      }).setOrigin(0.5).setDepth(depth + 2);
+      attachTooltip(img, () => demoneTooltipText(d), { growDown: true });
+      const mark = scene.add.text(cx + 42, cy - 70, "★", {
+        font: "18px Arial",
+        fill: "#FFD700",
+        stroke: "#000",
+        strokeThickness: 3
+      }).setDepth(depth + 3).setAlpha(0).setOrigin(0.5);
+      const pick = () => {
+        selected = d;
+        cards.forEach(card => card.mark.setAlpha(card.model === selected ? 1 : 0));
+        cards.forEach(card => card.frame.setStrokeStyle(3, card.model === selected ? 0xFFD700 : 0x555577));
+      };
+      frame.on("pointerdown", pick);
+      img.on("pointerdown", pick);
+      cards.push({ frame, img, name, mark, model: d });
+    });
+
+    const confirm = scene.add.text(585, 470, "Sacrifica", {
+      font: "18px Arial",
+      fill: "#fff",
+      backgroundColor: "#3a9c4f",
+      padding: { x: 12, y: 6 }
+    }).setDepth(depth + 2).setInteractive({ useHandCursor: true });
+    const cancel = scene.add.text(705, 470, "Annulla", {
+      font: "18px Arial",
+      fill: "#fff",
+      backgroundColor: "#666",
+      padding: { x: 12, y: 6 }
+    }).setDepth(depth + 2).setInteractive({ useHandCursor: true });
+
+    const controls = [overlay, panel, title, confirm, cancel, ...cards.flatMap(c => [c.frame, c.img, c.name, c.mark])];
+    const cleanup = (val) => {
+      controls.forEach(o => { try { o.destroy(); } catch (_) {} });
+      modalOpen = false;
+      resolve(val || null);
+    };
+
+    confirm.on("pointerdown", () => cleanup(selected));
+    cancel.on("pointerdown", () => cleanup(null));
+    overlay.on("pointerdown", () => cleanup(null));
   });
 }
 
@@ -4437,6 +4603,10 @@ async function performBotAction(scene, bot, azione) {
       if (gioco.onAzione && res?.ok) gioco.onAzione(bot.nome, `Gioca magia ${azione.carta?.nome || ""}`);
       if (res?.ok) {
         const name = (azione.carta?.nome || "").toLowerCase();
+        if (name.includes("spostastelle") || name.includes("sposta stelle")) {
+          const pos = botPositions[bot.nome] || { x: 625, y: 360 };
+          showBotBalloon(scene, bot.nome, `${bot.nome} usa Spostastelle`, pos.x, pos.y);
+        }
         if (name.includes("illuminazione")) {
           await maybeHandleIlluminazione(scene, bot, azione.carta);
         }
@@ -4765,7 +4935,7 @@ function describeImprevistoEffect(eff) {
   }
 }
 
-function showImprevistoEffectBalloon(scene, text) {
+function showImprevistoEffectBalloon(scene, text, borderColor = 0xff5555) {
   if (!scene || !scene.add) return;
   const padding = { x: 12, y: 8 };
   const msg = scene.add.text(0, 0, text, {
@@ -4777,7 +4947,7 @@ function showImprevistoEffectBalloon(scene, text) {
   const bg = scene.add.graphics();
   bg.fillStyle(0x000000, 0.85);
   bg.fillRoundedRect(-w / 2, -h / 2, w, h, 14);
-  bg.lineStyle(2, 0xffda77, 0.9);
+  bg.lineStyle(2, borderColor, 0.9);
   bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 14);
   const y = 640;
   const container = scene.add.container(625, y, [bg, msg]);
@@ -4860,7 +5030,7 @@ function findAffordableLimbo(bot) {
   return best;
 }
 
-function showBotBalloon(scene, botName, message, x, y) {
+function showBotBalloon(scene, botName, message, x, y, borderColor = 0xffffff) {
   // rimuovi eventuali balloon attivi prima di mostrarne uno nuovo
   activeBalloons.forEach(b => {
     try { b.destroy(); } catch (_) { /* ignore */ }
@@ -4877,7 +5047,7 @@ function showBotBalloon(scene, botName, message, x, y) {
   const bg = scene.add.graphics();
   bg.fillStyle(0x000000, 0.8);
   bg.fillRoundedRect(-w / 2, -h / 2, w, h, 16);
-  bg.lineStyle(2, 0xffffff, 0.9);
+  bg.lineStyle(2, borderColor, 0.9);
   bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 16);
   const container = scene.add.container(x, y, [bg, text]);
   text.setOrigin(0.5);

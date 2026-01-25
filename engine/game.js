@@ -146,48 +146,72 @@ export class Gioco {
     let requisito = boss.requisitoPer ? boss.requisitoPer(sig) : Infinity;
     const stelle = player?.totale_stelle ?? 0;
 
-    // Spostastelle attaccante: prova a ridurre il requisito se non sufficiente
-    const attSposta = this._findSpostastelle(player);
-    if (attSposta && stelle < requisito) {
-      const step = this._chooseRotationForAttacker(boss, sig, stelle, attSposta);
-      if (step !== null) {
-        this._rotateBoss(boss, step, player);
+    const players = this.giocatori || [];
+    const attackerIdx = Math.max(0, players.indexOf(player));
+
+    const tryRotate = (pl, step, card, desc, beforeOffset, beforeVals) => {
+      if (step === null || step === undefined) return false;
+      this._rotateBoss(boss, step, pl);
+      requisito = boss.requisitoPer(sig);
+      this._consumeSpostastelle(pl, card, desc);
+      // Stoppastella può annullare solo quest'ultima rotazione
+      if (this._tryStoppastella(pl, boss, beforeOffset, beforeVals)) {
         requisito = boss.requisitoPer(sig);
-        this._consumeSpostastelle(player, attSposta, `Spostastelle attacco ${step}`);
-        // Stoppastella avversaria: ripristina stato precedente
-        if (this._tryStoppastella(player, boss, prevOffset, prevVals)) {
-          requisito = boss.requisitoPer(sig);
-        }
       }
-    }
+      return true;
+    };
 
-    // Ricalcola dopo eventuale rotazione
-    requisito = boss.requisitoPer(sig);
-    let ok = sig != null && stelle >= requisito;
+    const tryAttackerSposta = () => {
+      const card = this._findSpostastelle(player);
+      if (!card) return false;
+      const step = this._chooseRotationForAttacker(boss, sig, stelle, card);
+      if (step === null) return false;
+      const beforeOffset = boss._offset || 0;
+      const beforeVals = { ...(boss.valori || {}) };
+      return tryRotate(player, step, card, `Spostastelle attacco ${step}`, beforeOffset, beforeVals);
+    };
 
-    // Spostastelle difensori: se l'attaccante ora conquista, prova a bloccarlo
-    if (ok) {
-      for (const opp of this.giocatori) {
-        if (opp === player) continue;
+    const tryDefenderSposta = () => {
+      const total = players.length || 0;
+      for (let i = 1; i < total; i += 1) {
+        const opp = players[(attackerIdx + i) % total];
+        if (!opp || opp === player) continue;
         const card = this._findSpostastelle(opp);
         if (!card) continue;
         const step = this._chooseRotationForDefender(boss, sig, stelle, card);
-        if (step !== null) {
-          const beforeOffset = boss._offset || 0;
-          const beforeVals = { ...(boss.valori || {}) };
-          this._rotateBoss(boss, step, opp);
-          requisito = boss.requisitoPer(sig);
-          ok = stelle >= requisito;
-          this._consumeSpostastelle(opp, card, `Spostastelle difesa ${step} da ${opp.nome}`);
-          // Attaccante o altri possono stoppare: ripristina
-          if (this._tryStoppastella(opp, boss, beforeOffset, beforeVals)) {
-            requisito = boss.requisitoPer(sig);
-            ok = stelle >= requisito;
-          }
-          if (!ok) break;
-        }
+        if (step === null) continue;
+        // I bot difendono con probabilità 90%, così a volte lasciano che risponda chi segue
+        if (opp.isBot && Math.random() > 0.9) continue;
+        const beforeOffset = boss._offset || 0;
+        const beforeVals = { ...(boss.valori || {}) };
+        tryRotate(opp, step, card, `Spostastelle difesa ${step} da ${opp.nome}`, beforeOffset, beforeVals);
+        return true;
+      }
+      return false;
+    };
+
+    // Loop di contrattacco: attaccante prova a vincere, difensori rispondono in ordine
+    let guard = 0;
+    let ok = sig != null && stelle >= requisito;
+    while (guard < 20) {
+      guard += 1;
+      if (ok) {
+        // Attaccante ora conquista: lascia spazio ai difensori in ordine
+        const used = tryDefenderSposta();
+        requisito = boss.requisitoPer(sig);
+        ok = sig != null && stelle >= requisito;
+        if (!used) break; // nessun difensore ha risposto, conquista riuscita
+      } else {
+        // Attaccante non conquista: prova a usare Spostastelle per ridurre
+        const used = tryAttackerSposta();
+        requisito = boss.requisitoPer(sig);
+        ok = sig != null && stelle >= requisito;
+        if (!used) break; // nessuna carta per migliorare: fallisce
       }
     }
+
+    // reset flag skip spostastelle (umano che ha premuto annulla)
+    players.forEach(p => { delete p._skipSpostaThisConquest; });
 
     this.tentativo_conquista_fatto = true;
     if (ok) {
@@ -386,6 +410,7 @@ export class Gioco {
 
   _findSpostastelle(giocatore) {
     if (!giocatore?.mano) return null;
+    if (giocatore._skipSpostaThisConquest) return null;
     return giocatore.mano.find(c => c?.azione_boss?.rotazione);
   }
 
