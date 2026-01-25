@@ -34,6 +34,7 @@ let lastLogNormalized = null;
 let spionePanel = null;
 let handChangeLog = [];
 let discardPileSprite = null;
+let cemeteryPileSprite = null;
 let currentScene = null;
 const passiveEventBus = [];
 const passiveStates = {
@@ -301,10 +302,13 @@ function create() {
   ui.mazzi.evo = this.add.text(810, 460, "Mazzo: -", { font: "11px Arial", fill: "#aaa" });
 
   // --- Cimitero e scarti ---
-  this.add.image(830, 240, "cemetery_empty").setScale(0.4);
+  cemeteryPileSprite = this.add.image(830, 240, "cemetery_empty").setScale(0.4);
+  cemeteryPileSprite.setInteractive();
+  attachTooltip(cemeteryPileSprite, () => cemeteryTooltipText(), { growDown: true });
   discardPileSprite = this.add.image(450, 230, "discard_empty").setScale(0.4);
   discardPileSprite.setInteractive();
   attachTooltip(discardPileSprite, () => scartiTooltipText(), { growDown: true });
+  updateCemeteryUI(this);
   this.add.text(800, 182, "CIMITERO", { font: "11px Arial", fill: "#aaa" });
   this.add.text(415, 175, "SCARTI", { font: "11px Arial", fill: "#aaa" });
 
@@ -1142,6 +1146,9 @@ async function startNewGame(scene) {
         syncHumanHand(scene);
         refreshUI(scene);
       });
+      gioco.addListener("scarti_prelevati", ({ giocatore, carte }) => {
+        handleScartiPrelevati(scene, giocatore, carte);
+      });
     }
     giocoPronto = true;
     syncHumanHand(scene);
@@ -1676,6 +1683,8 @@ async function handleDemoneEntrata(scene, giocatore, demone) {
     await oriasEffect(scene);
   } else if (name.includes("azael")) {
     await azaelEffect(scene, giocatore);
+  } else if (name.includes("hafgufa")) {
+    await hafgufaEffect(scene, giocatore);
   }
 }
 
@@ -1688,6 +1697,29 @@ async function maybeHandleIlluminazione(scene, giocatore, cartaMagia) {
     const pos = botPositions[giocatore.nome] || { x: 625, y: 360 };
     showBotBalloon(scene, giocatore.nome, `Illuminazione: ${target.nome}`, pos.x, pos.y);
   }
+}
+
+async function maybeTriggerKraken(scene, sourcePlayer, carte = []) {
+  const holders = (gioco?.giocatori || []).filter(p =>
+    (p.cerchia || []).some(d => (d?.nome || "").toLowerCase().includes("kraken"))
+  );
+  if (!holders.length) return;
+  const drawn = [];
+  holders.forEach(p => {
+    const c = gioco.pescaRifornimento(p);
+    if (c) {
+      drawn.push({ player: p, card: c });
+      if (!p?.isBot) addCardToHand(scene, c, { silent: true });
+    }
+  });
+  holders.forEach(p => { if (!p?.isBot) syncHumanHand(scene); });
+  if (drawn.length) refreshUI(scene);
+}
+
+async function handleScartiPrelevati(scene, giocatore, carte = []) {
+  await maybeTriggerKraken(scene, giocatore, carte);
+  if (!giocatore?.isBot) syncHumanHand(scene);
+  refreshUI(scene);
 }
 
 function chooseDemoneForIlluminazione(scene, giocatore) {
@@ -1945,6 +1977,7 @@ async function nemeaEffect(scene, giocatore) {
       if (idx >= 0) gioco.scarti.splice(idx, 1);
       giocatore.mano.push(best);
       if (!giocatore?.isBot) addCardToHand(scene, best, { silent: true });
+      await maybeTriggerKraken(scene, giocatore, [best]);
     }
   }
   if (!giocatore?.isBot) syncHumanHand(scene);
@@ -1995,6 +2028,32 @@ async function selkieEffect(scene, giocatore) {
   if (carta) {
     giocatore.mano.push(carta);
     if (!giocatore?.isBot) addCardToHand(scene, carta, { silent: true });
+    await maybeTriggerKraken(scene, giocatore, [carta]);
+  }
+  if (!giocatore?.isBot) syncHumanHand(scene);
+  updateDiscardPileUI(scene);
+  refreshUI(scene);
+}
+
+async function hafgufaEffect(scene, giocatore) {
+  if (!gioco || !gioco.scarti.length) {
+    refreshUI(scene);
+    return;
+  }
+  const takeCount = Math.min(2, gioco.scarti.length);
+  const taken = [];
+  for (let i = 0; i < takeCount; i += 1) {
+    if (!gioco.scarti.length) break;
+    const idx = Math.floor(Math.random() * gioco.scarti.length);
+    const card = gioco.scarti.splice(idx, 1)[0];
+    if (card) {
+      giocatore.mano.push(card);
+      taken.push(card);
+      if (!giocatore?.isBot) addCardToHand(scene, card, { silent: true });
+    }
+  }
+  if (taken.length) {
+    await maybeTriggerKraken(scene, giocatore, taken);
   }
   if (!giocatore?.isBot) syncHumanHand(scene);
   updateDiscardPileUI(scene);
@@ -2074,7 +2133,37 @@ async function windigoEffect(scene, giocatore, demone) {
 
   let candidate = null;
   if (giocatore?.isBot) {
-    candidate = altri.slice().sort((a,b)=> (b.livello_stella||0)-(a.livello_stella||0))[0];
+    const specials = altri.filter(d => {
+      const n = (d?.nome || "").toLowerCase();
+      return n === "el coco" || n === "furie";
+    });
+    const high = altri.filter(d => (d?.livello_stella || 0) >= 2);
+    const pool = specials.length ? specials : (high.length ? high : altri);
+    const has = (name) => (giocatore.cerchia || []).some(x => (x?.nome || "").toLowerCase() === name);
+    const score = (d) => {
+      const nome = (d?.nome || "").toLowerCase();
+      const tipo = (d?.tipo_effetto || "").toLowerCase();
+      let s = d?.livello_stella || 0;
+      if (nome === "el coco" || nome === "furie") return -10;
+      if (nome === "boto cor de rosa") s += 2;
+      if (tipo === "entrata") s -= 0.6;
+      else if (tipo === "azione") s += 0.3;
+      const combos = [
+        ["kraken", "leviatano", 1.0],
+        ["valak", "mammon", 0.8],
+        ["akerbeltz", "behemoth", 0.5],
+      ];
+      combos.forEach(([a, b, bonus]) => {
+        if ((nome === a && has(b)) || (nome === b && has(a))) s += bonus;
+      });
+      return s;
+    };
+    candidate = pool.slice().sort((a, b) => {
+      const sa = score(a);
+      const sb = score(b);
+      if (sa !== sb) return sa - sb;
+      return (a?.livello_stella || 0) - (b?.livello_stella || 0);
+    })[0];
   } else {
     candidate = await openWindigoSacrificeDialog(scene, altri);
   }
@@ -2523,6 +2612,82 @@ async function openJakalopeChoice(scene, cards) {
     overlay.on("pointerdown", () => cleanup(null));
   });
 }
+
+async function openPranayamaChoice(scene, cards, recipientName = "avversario") {
+  return new Promise(resolve => {
+    modalOpen = true;
+    const depth = 6450;
+    const overlay = scene.add.rectangle(625, 360, 1250, 720, 0x000000, 0.45).setDepth(depth).setInteractive();
+    const panel = scene.add.rectangle(625, 360, 860, 320, 0x1f1f2e, 0.95)
+      .setDepth(depth + 1).setStrokeStyle(2, 0x888888);
+    const title = scene.add.text(625, 250, `Pranayama: scegli la carta da dare a ${recipientName}`, {
+      font: "20px Arial",
+      fill: "#ffda77"
+    }).setOrigin(0.5).setDepth(depth + 2);
+
+    const startX = 330;
+    const spacing = 130;
+    const cardSprites = [];
+    let selected = cards[0];
+
+    cards.forEach((c, i) => {
+      const cx = startX + i * spacing;
+      const cy = 360;
+      const frame = scene.add.rectangle(cx, cy, 110, 150, 0x333344, 0.85)
+        .setDepth(depth + 1)
+        .setStrokeStyle(2, 0x555577)
+        .setInteractive({ useHandCursor: true });
+      const tex = getTextureForCard(c, "rifornimento");
+      const img = scene.add.image(cx, cy, tex).setScale(0.11).setDepth(depth + 2);
+      const name = scene.add.text(cx, cy + 90, truncateText(c.nome || "", 12), {
+        font: "13px Arial",
+        fill: "#fff"
+      }).setOrigin(0.5).setDepth(depth + 2);
+      const mark = scene.add.text(cx + 42, cy - 70, "★", {
+        font: "18px Arial",
+        fill: "#FFD700",
+        stroke: "#000",
+        strokeThickness: 3
+      }).setDepth(depth + 3).setAlpha(i === 0 ? 1 : 0).setOrigin(0.5);
+      attachTooltip(img, () => magiaTooltipText(c));
+
+      const pick = () => {
+        selected = c;
+        cardSprites.forEach(card => {
+          card.mark.setAlpha(card.model === selected ? 1 : 0);
+          card.frame.setStrokeStyle(3, card.model === selected ? 0xFFD700 : 0x555577);
+        });
+      };
+      frame.on("pointerdown", pick);
+      img.on("pointerdown", pick);
+      cardSprites.push({ frame, img, name, mark, model: c });
+    });
+
+    const confirm = scene.add.text(585, 470, "Dai carta", {
+      font: "18px Arial",
+      fill: "#fff",
+      backgroundColor: "#3a9c4f",
+      padding: { x: 12, y: 6 }
+    }).setDepth(depth + 2).setInteractive({ useHandCursor: true });
+    const cancel = scene.add.text(705, 470, "Annulla", {
+      font: "18px Arial",
+      fill: "#fff",
+      backgroundColor: "#666",
+      padding: { x: 12, y: 6 }
+    }).setDepth(depth + 2).setInteractive({ useHandCursor: true });
+
+    const controls = [overlay, panel, title, confirm, cancel, ...cardSprites.flatMap(c => [c.frame, c.img, c.name, c.mark])];
+    const cleanup = (val) => {
+      controls.forEach(o => { try { o.destroy(); } catch (_) {} });
+      modalOpen = false;
+      resolve(val || null);
+    };
+
+    confirm.on("pointerdown", () => cleanup(selected));
+    cancel.on("pointerdown", () => cleanup(null));
+    overlay.on("pointerdown", () => cleanup(null));
+  });
+}
 function pickLowestEnergyOrAny(handArr) {
   if (!Array.isArray(handArr) || !handArr.length) return null;
   const sorted = handArr.slice().sort((a, b) => {
@@ -2876,7 +3041,7 @@ function attachTooltip(sprite, getText, opts = {}) {
     const originY = growDown ? 0 : 1;
     sprite._tooltip = sprite.scene.add.text(pointer.worldX + 12, pointer.worldY + offsetY, txt, style)
       .setOrigin(0, originY)
-      .setDepth(5000);
+      .setDepth(10000); // forza in primo piano
   });
   sprite.on("pointermove", setPos);
   sprite.on("pointerout", destroyTip);
@@ -2968,6 +3133,21 @@ async function playMagicCard(scene, card) {
     if (choice != null && opts.includes(choice)) {
       model._rotationChoice = choice;
     }
+  }
+
+  // Gestione speciale per Pranayama lato umano: permette di scegliere la carta da donare
+  const isHumanPrana = !giocatore?.isBot && (model.nome || "").toLowerCase().includes("pranayama");
+  if (isHumanPrana) {
+    const ok = await handlePranayamaHuman(scene, giocatore, model);
+    delete model._rotationChoice;
+    if (ok) {
+      if (gioco.completeAction) gioco.completeAction(true);
+      else gioco.registraAzione();
+    } else if (gioco.completeAction) {
+      gioco.completeAction(false);
+    }
+    refreshUI(scene);
+    return;
   }
 
   const res = gioco.giocaMagia(giocatore, model);
@@ -3070,6 +3250,54 @@ function askRotationChoice(scene, options = []) {
   });
 }
 
+async function handlePranayamaHuman(scene, giocatore, cartaMagia) {
+  if (!gioco || !giocatore || !cartaMagia) return false;
+  // rimuovi la magia dalla mano e scartala
+  const idx = giocatore.mano.indexOf(cartaMagia);
+  if (idx >= 0) giocatore.mano.splice(idx, 1);
+  gioco.scartaCarteDi(giocatore, [cartaMagia]);
+  removePaidFromHand(scene, [cartaMagia]);
+  updateDiscardPileUI(scene);
+
+  const reveal = [];
+  for (let i = 0; i < 3; i += 1) {
+    const c = gioco.mazzo_rifornimenti.pesca();
+    if (c) reveal.push(c);
+  }
+  if (!reveal.length) {
+    showBotBalloon(scene, "Sistema", "Pranayama: nessuna carta da rivelare", 625, 600);
+    return false;
+  }
+
+  const opponents = (gioco.giocatori || []).filter(p => p !== giocatore);
+  const recipient = opponents.slice().sort((a,b)=> (a.mano.length||0)-(b.mano.length||0))[0] || null;
+
+  let give = null;
+  if (reveal.length >= 3 && recipient) {
+    give = await openPranayamaChoice(scene, reveal, recipient.nome);
+    if (!give) {
+      // fallback: carta con valore più basso
+      give = reveal.slice().sort((a,b)=> (a.valore||0)-(b.valore||0))[0];
+    }
+  }
+
+  if (give && recipient) {
+    const gIdx = reveal.indexOf(give);
+    if (gIdx >= 0) reveal.splice(gIdx, 1);
+    recipient.mano.push(give);
+  }
+
+  // le restanti vanno al giocatore
+  reveal.forEach(c => {
+    giocatore.mano.push(c);
+    addCardToHand(scene, c, { silent: true });
+  });
+
+  if (gioco.onAzione) gioco.onAzione(giocatore.nome, "Gioca Pranayama");
+  syncHumanHand(scene);
+  return true;
+}
+
 async function maybeUseHumanSpostastelle(scene, modo = "difesa") {
   if (!gioco || !giocoPronto) return;
   if (gioco._orias_block) return; // blocco Spostastelle attivo
@@ -3082,7 +3310,8 @@ async function maybeUseHumanSpostastelle(scene, modo = "difesa") {
   if (!sposte.length) return;
   const choice = await openSpostaDialog(scene, boss, attacker, sposte, modo);
   if (!choice) {
-    player._skipSpostaThisConquest = true; // evita consumo automatico in conquistaBoss
+    // in difesa evita uso automatico; in attacco permetti un eventuale retry durante la conquista
+    player._skipSpostaThisConquest = (modo === "difesa");
     return;
   }
   const { card, step } = choice;
@@ -3096,6 +3325,25 @@ async function maybeUseHumanSpostastelle(scene, modo = "difesa") {
   }
 }
 
+async function askHumanSpostaDuringConquest(scene, ctx = {}) {
+  const boss = ctx?.boss || gioco?.prossimoBoss?.();
+  const attacker = ctx?.attacker || gioco?.giocatoreCorrente?.();
+  const player = gioco?.giocatori?.find(p => p.nome === "Player");
+  if (!boss || !attacker || !player) return null;
+  const sposte = (player.mano || []).filter(c => c?.azione_boss?.rotazione);
+  const stopCards = (player.mano || []).filter(c => c?.azione_boss?.annulla);
+  if (!sposte.length && !(stopCards.length && ctx?.lastStep != null)) return null;
+  const choice = await openSpostaDialog(
+    scene,
+    boss,
+    attacker,
+    sposte,
+    ctx?.modo || "attacco",
+    { stopCards, lastStep: ctx?.lastStep }
+  );
+  return choice || null;
+}
+
 function simulateReqAfterRotation(boss, sigillo, step) {
   if (!boss || !sigillo) return { before: 0, after: 0 };
   const before = boss.requisitoPer(sigillo);
@@ -3105,7 +3353,7 @@ function simulateReqAfterRotation(boss, sigillo, step) {
   return { before, after };
 }
 
-function openSpostaDialog(scene, boss, attacker, carte, modo) {
+function openSpostaDialog(scene, boss, attacker, carte, modo, opts = {}) {
   return new Promise(resolve => {
     modalOpen = true;
     const depth = 6000;
@@ -3113,8 +3361,8 @@ function openSpostaDialog(scene, boss, attacker, carte, modo) {
     const lineH = 50;
     // Prepara le righe effettive e rimuove duplicati
     const rowsData = [];
-    const normalizeSteps = (opts) => {
-      const set = new Set(Array.isArray(opts) ? opts : []);
+    const normalizeSteps = (options) => {
+      const set = new Set(Array.isArray(options) ? options : []);
       Array.from(set).forEach(s => {
         if (Math.abs(s) === 2) {
           const sign = Math.sign(s) || 1;
@@ -3135,9 +3383,21 @@ function openSpostaDialog(scene, boss, attacker, carte, modo) {
         const elementLabel = (elementRaw || "").replace(/^ENERGIA_/i, "").replace(/_/g, " ");
         const energyVal = Number(card?.valore) || 0;
         const labelText = energyVal ? `${energyVal} ${elementLabel}`.trim() : elementLabel;
-        rowsData.push({ card, step, before, after, labelText });
+        rowsData.push({ card, step, before, after, labelText, tipo: "sposta" });
       });
     });
+
+    // Aggiungi Stoppastella (annulla ultimo spostastelle) se disponibile
+    if (opts.lastStep != null && Array.isArray(opts.stopCards) && opts.stopCards.length) {
+      opts.stopCards.forEach((card, idx) => {
+        const key = `stop-${card?._id || card?.nome || idx}`;
+        if (seenCombos.has(key)) return;
+        seenCombos.add(key);
+        const before = boss.requisitoPer(attacker?.sigillo);
+        const { after } = simulateReqAfterRotation(boss, attacker?.sigillo, -opts.lastStep);
+        rowsData.push({ card, step: -opts.lastStep, before, after, labelText: "Annulla", tipo: "stop" });
+      });
+    }
 
     const totalRows = rowsData.length || 1;
     const panelHeight = Math.max(220 + totalRows * lineH, 260);
@@ -3155,16 +3415,17 @@ function openSpostaDialog(scene, boss, attacker, carte, modo) {
     const divider = scene.add.line(panelX, dividerY, 0, 0, 480, 0, 0x555555).setDepth(depth + 1);
     const list = [];
     rowsData.forEach((rowData, idx) => {
-        const { card, before, after, labelText, step } = rowData;
+        const { card, before, after, labelText, step, tipo } = rowData;
         const y = startY + idx * lineH;
         const row = scene.add.rectangle(panelX, y, 500, 50, 0x2a2a3a, 0.8).setDepth(depth + 1).setStrokeStyle(2, 0x444455).setInteractive({ useHandCursor: true });
-        const cardName = scene.add.text(panelX - 210, y, `${card.nome}${labelText ? " (" + labelText + ")" : ""}`, { font: "bold 14px Arial", fill: "#ffda77" }).setDepth(depth + 2).setOrigin(0, 0.5);
+        const nameColor = tipo === "stop" ? "#ff8c8c" : "#ffda77";
+        const cardName = scene.add.text(panelX - 210, y, `${card.nome}${labelText ? " (" + labelText + ")" : ""}`, { font: "bold 14px Arial", fill: nameColor }).setDepth(depth + 2).setOrigin(0, 0.5);
         const reqBefore = scene.add.text(panelX + 5, y, `${before}`, { font: "bold 13px Arial", fill: "#ff6666" }).setDepth(depth + 2).setOrigin(0.5, 0.5);
         const arrow = scene.add.text(panelX + 45, y, "->", { font: "bold 16px Arial", fill: "#66dd66" }).setDepth(depth + 2).setOrigin(0.5, 0.5);
         const reqAfter = scene.add.text(panelX + 85, y, `${after}`, { font: "bold 13px Arial", fill: after < before ? "#66ff66" : "#ffaa66" }).setDepth(depth + 2).setOrigin(0.5, 0.5);
         row.on("pointerover", () => row.setFillStyle(0x3a3a4a, 0.95));
         row.on("pointerout", () => row.setFillStyle(0x2a2a3a, 0.8));
-        row.on("pointerdown", () => cleanup({ card, step }));
+        row.on("pointerdown", () => cleanup({ card, step, stoppa: tipo === "stop" }));
         list.push(row, cardName, reqBefore, arrow, reqAfter);
     });
     const closeX = panelX;
@@ -3185,7 +3446,8 @@ async function enforceHandLimit(scene, giocatore) {
     // per i bot scarta le prime 'extra' carte in mano
     const toDiscard = giocatore.mano.slice(0, extra);
     gioco.scartaCarteDi(giocatore, toDiscard);
-    animateBotDiscard(scene, giocatore.nome, toDiscard.length);
+    await animateBotDiscard(scene, giocatore.nome, toDiscard.length);
+    if (gioco.onAzione) gioco.onAzione(giocatore.nome, `Scarta ${toDiscard.length} (limite 6)`);
     refreshUI(scene);
     return;
   }
@@ -3382,6 +3644,8 @@ function addCardToHand(scene, cartaModel, options = {}) {
   card._overlayOffset = 45;
   addCardOverlay(scene, card, cartaModel, 45);
   const isMagic = (cartaModel?.categoria || "").toLowerCase() === "magia";
+  const isSposta = !!cartaModel?.azione_boss?.rotazione; // solo Spostastelle (rotazione)
+  const isStoppa = !!cartaModel?.azione_boss?.annulla; // Stoppastella (annulla)
   attachTooltip(card, () => isMagic ? magiaTooltipText(cartaModel) : demoneTooltipText(cartaModel));
   const slotIndex = hand.length;
   hand.push(card); // registra subito così gli slot non si sovrappongono
@@ -3443,8 +3707,8 @@ function addCardToHand(scene, cartaModel, options = {}) {
     });
   }
 
-  // Interattività per magie (escluse spostastelle/stoppastella): evidenziazione hover e click per attivare
-  const isSposta = !!cartaModel?.azione_boss;
+  // Interattività per magie: evidenziazione hover e click per attivare (ignora spostastelle/stoppastella)
+  
   if (isMagic) {
     card.setInteractive({ useHandCursor: true });
     const rect = scene.add.rectangle(card.x, card.y, card.displayWidth + 8, card.displayHeight + 8, 0xffffff, 0)
@@ -3468,6 +3732,7 @@ function addCardToHand(scene, cartaModel, options = {}) {
       rect.setVisible(false);
     });
     card.on("pointerdown", () => {
+      if (isSposta || isStoppa) return; // non attivare spostastelle/stoppastella dalla mano
       playMagicCard(scene, card);
     });
 
@@ -3814,7 +4079,6 @@ async function openLimboSelectionDialog(scene) {
         const active = c.model === selected;
         c.frame.setStrokeStyle(active ? 4 : 2, active ? 0xFFD700 : c.baseColor);
         c.frame.setAlpha(active ? 1 : 0.8);
-        c.checkmark?.setAlpha(active ? 1 : 0);
       });
       selectedLabel.setText(selected ? `Selezionato: ${selected.nome || "-"}` : "Nessuna selezione");
     };
@@ -3829,7 +4093,7 @@ async function openLimboSelectionDialog(scene) {
       const cx = startX + col * spacingX;
       const cy = startY + row * spacingY;
 
-      const frame = scene.add.rectangle(cx, cy, 90, 120, 0x444444, 0.7)
+      const frame = scene.add.rectangle(cx, cy, 100, 135, 0x444444, 0.7)
         .setDepth(depth + 1)
         .setStrokeStyle(2, baseColor)
         .setOrigin(0.5)
@@ -3842,8 +4106,8 @@ async function openLimboSelectionDialog(scene) {
       const name = scene.add.text(cx, cy - 70, truncateText(model.nome || "", 12), {
         font: "12px Arial",
         fill: "#000",
-        stroke: nameStroke,
-        strokeThickness: 3
+        stroke: "#fff",
+        strokeThickness: 4
       }).setOrigin(0.5).setDepth(depth + 2);
 
       // Aggiungi stelle livello
@@ -3872,14 +4136,7 @@ async function openLimboSelectionDialog(scene) {
       img.on("pointerdown", pick);
       attachTooltip(img, () => demoneTooltipText(model), { growDown: true });
 
-      const checkmark = scene.add.text(cx + 36, cy - 52, "✔", {
-        font: "18px Arial",
-        fill: "#FFD700",
-        stroke: "#000",
-        strokeThickness: 3
-      }).setDepth(depth + 3).setAlpha(0).setOrigin(0.5);
-
-      cards.push({ frame, img, name, model, stars, baseColor, checkmark });
+      cards.push({ frame, img, name, model, stars, baseColor });
     });
 
     const confirmBtn = scene.add.text(600, 500, "Evoca", {
@@ -3895,7 +4152,7 @@ async function openLimboSelectionDialog(scene) {
       padding: { x: 12, y: 6 }
     }).setDepth(depth + 2).setInteractive();
 
-    const controls = [overlay, panel, title, selectedLabel, confirmBtn, cancelBtn, ...cards.flatMap(c => [c.frame, c.img, c.name, c.checkmark, ...(c.stars || [])])];
+    const controls = [overlay, panel, title, selectedLabel, confirmBtn, cancelBtn, ...cards.flatMap(c => [c.frame, c.img, c.name, ...(c.stars || [])])];
     const cleanup = (choice) => {
       controls.forEach(o => { try { o.destroy(); } catch (_) {} });
       modalOpen = false;
@@ -4161,7 +4418,7 @@ function tentaConquista(scene, forzato = false) {
     // Prompt Spostastelle per umano (attacco se umano, difesa se bot)
     const isHumanAttacker = current?.nome === "Player";
     await maybeUseHumanSpostastelle(scene, isHumanAttacker ? "attacco" : "difesa");
-    const ok = gioco.conquistaBoss(boss);
+    const ok = await gioco.conquistaBoss(boss);
     // Se conquista riuscita, il prossimo boss parte coperto
     if (ok && bossCard) {
       bossCard.setTexture("boss_back");
@@ -4342,6 +4599,7 @@ function refreshUI(scene) {
   if (cerchiaSprites.length) layoutHumanCerchia(scene);
   updateBossUI(scene);
   updateDiscardPileUI(scene);
+  updateCemeteryUI(scene);
   syncLimboSprites(scene);
   syncBotCerchiaSprites(scene);
   updateNextButtonState(scene);
@@ -4431,6 +4689,7 @@ async function advanceTurn(scene) {
   while (current?.isBot) {
     await runBotTurn(scene, current);
     gioco.prossimoTurno();
+    await enforceHandLimit(scene, current); // controllo limite mano anche per bot a fine turno
     refreshUI(scene);
     current = gioco.giocatoreCorrente();
     showBotBalloon(scene, current.nome, "Nuovo turno", 625, 80);
@@ -4668,7 +4927,11 @@ async function performBotAction(scene, bot, azione) {
       revealBossCard(scene);
       // Consenti all'umano di usare Spostastelle in difesa
       await maybeUseHumanSpostastelle(scene, "difesa");
-      const esito = gioco.conquistaBoss(boss);
+      const esito = await gioco.conquistaBoss(boss);
+      if (esito && bossCard) {
+        bossCard.setTexture("boss_back");
+        bossCard.flipped = false;
+      }
       if (gioco.onAzione && boss) gioco.onAzione(bot.nome, `Tenta ${boss.nome}`);
       const pos = botPositions[bot.nome] || { x: 625, y: 360 };
       showBotBalloon(scene, bot.nome, esito ? `Conquista ${boss?.nome || "boss"}` : "Conquista fallita", pos.x, pos.y);
@@ -4802,23 +5065,38 @@ passiveEventBus.push(async (scene, type, payload) => {
 });
 
 function animateBotDiscard(scene, botName, count = 1) {
-  const pos = botPositions[botName];
-  if (!pos) return;
-  const targetX = 450;
-  const targetY = 230;
-  const delayStep = 80;
-  for (let i = 0; i < count; i += 1) {
-    const card = scene.add.image(pos.mano.x, pos.mano.y, "dorso_rifornimenti").setScale(0.06).setDepth(1200);
-    scene.tweens.add({
-      targets: card,
-      x: targetX,
-      y: targetY,
-      duration: 400,
-      delay: i * delayStep,
-      ease: "Cubic.easeIn",
-      onComplete: () => { try { card.destroy(); } catch (_) {} },
-    });
-  }
+  return new Promise(resolve => {
+    const pos = botPositions[botName];
+    if (!pos) {
+      resolve();
+      return;
+    }
+    const targetX = 450;
+    const targetY = 230;
+    const delayStep = 80;
+    if (count <= 0) {
+      resolve();
+      return;
+    }
+    let done = 0;
+    const onCompleteOne = (card) => {
+      try { card.destroy(); } catch (_) {}
+      done += 1;
+      if (done >= count) resolve();
+    };
+    for (let i = 0; i < count; i += 1) {
+      const card = scene.add.image(pos.mano.x, pos.mano.y, "dorso_rifornimenti").setScale(0.06).setDepth(1200);
+      scene.tweens.add({
+        targets: card,
+        x: targetX,
+        y: targetY,
+        duration: 400,
+        delay: i * delayStep,
+        ease: "Cubic.easeIn",
+        onComplete: () => onCompleteOne(card),
+      });
+    }
+  });
 }
 
 function animateBotEvocaDemone(scene, bot, demone) {
@@ -4912,7 +5190,7 @@ function flashImprevistoCard(scene, pos = { x: 625, y: 280 }) {
     alpha: 0,
     scale: card.scale * 0.9,
     duration: 400,
-    delay: 450,
+    delay: 500,
     ease: "Cubic.easeIn",
     onComplete: () => { try { card.destroy(); } catch (_) {} },
   });
@@ -5093,4 +5371,22 @@ function updateDiscardPileUI(scene) {
   if (!discardPileSprite || !discardPileSprite.active) return;
   const has = (gioco?.scarti?.length || 0) > 0;
   discardPileSprite.setTexture(has ? "discard_pile" : "discard_empty");
+  updateCemeteryUI(scene);
+}
+
+function cemeteryTooltipText() {
+  const list = (gioco?.cimitero || []).filter(c => c instanceof Demone);
+  if (!list.length) return "Cimitero vuoto";
+  const counts = new Map();
+  list.forEach(c => {
+    const n = c?.nome || "Demone";
+    counts.set(n, (counts.get(n) || 0) + 1);
+  });
+  return Array.from(counts.entries()).map(([n, cnt]) => `${n}${cnt > 1 ? ` x${cnt}` : ""}`).join("\n");
+}
+
+function updateCemeteryUI(scene) {
+  if (!cemeteryPileSprite || !cemeteryPileSprite.active) return;
+  const has = (gioco?.cimitero?.length || 0) > 0;
+  cemeteryPileSprite.setTexture(has ? "cemetery_pile" : "cemetery_empty");
 }

@@ -136,12 +136,34 @@ export class Gioco {
     return carta;
   }
 
-  conquistaBoss(boss) {
+  async conquistaBoss(boss) {
     if (!boss) return false;
     const player = this.giocatoreCorrente();
     const sig = player?.sigillo;
+    const attackerIsHuman = !!(player && player.nome === "Player" && !player.isBot);
+    const askHumanSposta = async (modo = "attacco") => {
+      if (!attackerIsHuman || typeof this.askHumanSpostastelle !== "function") return null;
+      try {
+        return await this.askHumanSpostastelle({ boss, attacker: player, modo });
+      } catch (_) {
+        return null;
+      }
+    };
     const prevOffset = boss._offset || 0;
     const prevVals = { ...(boss.valori || {}) };
+    const sigAtt = sig;
+    const stelleAtt = stelle;
+
+    const computeReq = (vals, offset) => {
+      const savedOffset = boss._offset;
+      const savedVals = { ...(boss.valori || {}) };
+      boss._offset = offset;
+      boss.valori = { ...vals };
+      const r = boss.requisitoPer(sigAtt);
+      boss._offset = savedOffset;
+      boss.valori = savedVals;
+      return r;
+    };
 
     let requisito = boss.requisitoPer ? boss.requisitoPer(sig) : Infinity;
     const stelle = player?.totale_stelle ?? 0;
@@ -149,19 +171,89 @@ export class Gioco {
     const players = this.giocatori || [];
     const attackerIdx = Math.max(0, players.indexOf(player));
 
-    const tryRotate = (pl, step, card, desc, beforeOffset, beforeVals) => {
+    const tryStoppastella = async (rotator, step, beforeOffset, beforeVals) => {
+      const reqBefore = computeReq(beforeVals, beforeOffset);
+      const reqAfter = boss.requisitoPer(sigAtt);
+      let chosenName = null;
+      for (const pl of this.giocatori) {
+        if (pl === rotator) continue;
+        // Se la rotazione è difensiva (rotator non è attaccante), solo l'attaccante può stoppare
+        if (rotator !== player && pl !== player) continue;
+        // Se la rotazione è offensiva (attaccante), solo i difensori possono stoppare
+        if (rotator === player && pl === player) continue;
+
+        const stop = this._findStoppastella(pl);
+        if (!stop) continue;
+
+        // Valuta se ha senso usare Stoppastella
+        let shouldUse = false;
+        if (rotator === player) {
+          // Attaccante ha abbassato il requisito: difensori usano stop se ora l'attaccante può conquistare o il requisito è sceso
+          if (reqAfter < reqBefore || reqAfter <= stelleAtt) {
+            shouldUse = true;
+          }
+        } else {
+          // Difensore ha alzato il requisito: attaccante usa stop se prima poteva conquistare e ora no
+          if (reqBefore <= stelleAtt && reqAfter > stelleAtt) {
+            shouldUse = true;
+          }
+        }
+        if (!shouldUse) continue;
+
+        let used = false;
+        let cardUsed = stop;
+        if (pl.nome === "Player") {
+          if (typeof this.askHumanSpostastelle === "function") {
+            const res = await this.askHumanSpostastelle({ boss, attacker: rotator, modo: "stoppastella", lastStep: step, canStoppastella: true });
+            if (!res || !res.stoppa || !res.card) continue;
+            cardUsed = res.card;
+            const idx = pl.mano.indexOf(cardUsed);
+            if (idx >= 0) pl.mano.splice(idx, 1);
+            this.scartaCarteDi(pl, [cardUsed]);
+            used = true;
+          } else {
+            // se manca il prompt, non usare automaticamente la carta umana
+            continue;
+          }
+        } else {
+          // Bot: uso automatico solo se utile
+          const idx = pl.mano.indexOf(stop);
+          if (idx >= 0) pl.mano.splice(idx, 1);
+          this.scartaCarteDi(pl, [stop]);
+          used = true;
+        }
+        if (!used) continue;
+        chosenName = cardUsed?.nome || stop?.nome || "Stoppastella";
+        boss._offset = beforeOffset;
+        boss.valori = { ...beforeVals };
+        this._log("stoppastella", `${pl.nome} annulla lo Spostastelle`, { giocatore: pl.nome, carta: chosenName });
+        if (this.onAzione) this.onAzione(pl.nome, "Gioca Stoppastella");
+        return true;
+      }
+      return false;
+    };
+
+    const tryRotate = async (pl, step, card, desc, beforeOffset, beforeVals) => {
       if (step === null || step === undefined) return false;
       this._rotateBoss(boss, step, pl);
       requisito = boss.requisitoPer(sig);
       this._consumeSpostastelle(pl, card, desc);
       // Stoppastella può annullare solo quest'ultima rotazione
-      if (this._tryStoppastella(pl, boss, beforeOffset, beforeVals)) {
-        requisito = boss.requisitoPer(sig);
-      }
-      return true;
+      await tryStoppastella(pl, step, beforeOffset, beforeVals);
+      requisito = boss.requisitoPer(sig);
+      return true; // anche se stoppato, l'azione è stata tentata
     };
 
-    const tryAttackerSposta = () => {
+    const tryAttackerSposta = async () => {
+      const cards = (player?.mano || []).filter(c => c?.azione_boss?.rotazione);
+      if (!cards.length) return false;
+      if (attackerIsHuman) {
+        const choice = await askHumanSposta("attacco");
+        if (!choice || !choice.card || choice.step == null) return false;
+        const beforeOffset = boss._offset || 0;
+        const beforeVals = { ...(boss.valori || {}) };
+        return tryRotate(player, choice.step, choice.card, `Spostastelle attacco ${choice.step}`, beforeOffset, beforeVals);
+      }
       const card = this._findSpostastelle(player);
       if (!card) return false;
       const step = this._chooseRotationForAttacker(boss, sig, stelle, card);
@@ -171,7 +263,7 @@ export class Gioco {
       return tryRotate(player, step, card, `Spostastelle attacco ${step}`, beforeOffset, beforeVals);
     };
 
-    const tryDefenderSposta = () => {
+    const tryDefenderSposta = async () => {
       const total = players.length || 0;
       for (let i = 1; i < total; i += 1) {
         const opp = players[(attackerIdx + i) % total];
@@ -184,8 +276,8 @@ export class Gioco {
         if (opp.isBot && Math.random() > 0.9) continue;
         const beforeOffset = boss._offset || 0;
         const beforeVals = { ...(boss.valori || {}) };
-        tryRotate(opp, step, card, `Spostastelle difesa ${step} da ${opp.nome}`, beforeOffset, beforeVals);
-        return true;
+        const rotated = await tryRotate(opp, step, card, `Spostastelle difesa ${step} da ${opp.nome}`, beforeOffset, beforeVals);
+        return rotated;
       }
       return false;
     };
@@ -197,13 +289,13 @@ export class Gioco {
       guard += 1;
       if (ok) {
         // Attaccante ora conquista: lascia spazio ai difensori in ordine
-        const used = tryDefenderSposta();
+        const used = await tryDefenderSposta();
         requisito = boss.requisitoPer(sig);
         ok = sig != null && stelle >= requisito;
         if (!used) break; // nessun difensore ha risposto, conquista riuscita
       } else {
         // Attaccante non conquista: prova a usare Spostastelle per ridurre
-        const used = tryAttackerSposta();
+        const used = await tryAttackerSposta();
         requisito = boss.requisitoPer(sig);
         ok = sig != null && stelle >= requisito;
         if (!used) break; // nessuna carta per migliorare: fallisce
@@ -307,6 +399,7 @@ export class Gioco {
         if (c1 && (c1?.categoria || "").toLowerCase() === "magia" && opp.mano.length) {
           stealOne();
         }
+        this._emit("hand_changed", { players: [giocatore.nome, opp.nome] });
         return `Ruba carta da ${opp.nome}`;
       }
       case "bibidibodibibu": {
@@ -354,6 +447,7 @@ export class Gioco {
         const best = [...this.scarti].filter(c => c?.valore != null).sort((a,b)=> (b.valore||0)-(a.valore||0))[0];
         if (!best) return "Nessuna carta negli scarti";
         this.scarti.splice(this.scarti.lastIndexOf(best), 1);
+        this._emitPrelievoScarti(giocatore, [best]);
         giocatore.mano.push(best);
         return `Recupera ${best.nome} dagli scarti`;
       }
@@ -471,20 +565,7 @@ export class Gioco {
   }
 
   _tryStoppastella(rotator, boss, prevOffset, prevVals) {
-    for (const pl of this.giocatori) {
-      if (pl === rotator) continue;
-      const stop = this._findStoppastella(pl);
-      if (stop) {
-        const idx = pl.mano.indexOf(stop);
-        if (idx >= 0) pl.mano.splice(idx, 1);
-        this.scartaCarteDi(pl, [stop]);
-        boss._offset = prevOffset;
-        boss.valori = { ...prevVals };
-        this._log("stoppastella", `${pl.nome} annulla lo Spostastelle`, { giocatore: pl.nome, carta: stop.nome });
-        if (this.onAzione) this.onAzione(pl.nome, "Gioca Stoppastella");
-        return true;
-      }
-    }
+    // Deprecated: gestito direttamente in conquistaBoss con interazione umana/bot
     return false;
   }
 
@@ -564,6 +645,11 @@ export class Gioco {
   scartaCarte(carte) {
     // Metodo legacy: senza attore
     this.scartaCarteDi(null, carte);
+  }
+
+  _emitPrelievoScarti(giocatore, carte = []) {
+    const list = Array.isArray(carte) ? carte.filter(Boolean) : [];
+    this._emit("scarti_prelevati", { giocatore, carte: list });
   }
 
   scartaCarteDi(giocatore, carte) {
@@ -664,6 +750,7 @@ export class Gioco {
         const pick = [...this.scarti].sort((a,b)=> (b?.valore||0)-(a?.valore||0))[0];
         if (pick) {
           this.scarti.splice(this.scarti.lastIndexOf(pick), 1);
+          this._emitPrelievoScarti(giocatore, [pick]);
           giocatore.mano.push(pick);
           res.effetto = "scarti_recuperati";
           res.carta = pick;
