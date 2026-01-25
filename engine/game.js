@@ -365,7 +365,7 @@ export class Gioco {
     return ok;
   }
 
-  giocaMagia(giocatore, carta) {
+  async giocaMagia(giocatore, carta) {
     if (!giocatore || !carta) return { ok: false, motivo: "Parametri mancanti" };
     if ((carta?.categoria || "").toLowerCase() !== "magia") return { ok: false, motivo: "Non è una magia" };
     const idx = giocatore.mano.indexOf(carta);
@@ -376,7 +376,7 @@ export class Gioco {
     this.scartaCarteDi(giocatore, [carta]);
 
     const nome = (carta.nome || "").toLowerCase();
-    const eff = this._risolviMagia(giocatore, carta, nome);
+    const eff = await this._risolviMagia(giocatore, carta, nome);
 
     this._log("magia", `${giocatore.nome} gioca ${carta.nome}`, {
       giocatore: giocatore.nome,
@@ -390,7 +390,7 @@ export class Gioco {
     return { ok: true, effetto: eff };
   }
 
-  _risolviMagia(giocatore, carta, nome) {
+  async _risolviMagia(giocatore, carta, nome) {
     const bots = this.giocatori.filter(g => g !== giocatore);
     const firstOpponent = () => bots.find(b => b.mano.length || b.cerchia.length) || bots[0] || null;
     const pickOpponentWithMostCards = () => bots.slice().sort((a,b)=>b.mano.length - a.mano.length)[0] || firstOpponent();

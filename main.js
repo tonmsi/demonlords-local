@@ -3454,7 +3454,7 @@ async function playMagicCard(scene, card) {
     return;
   }
 
-  const res = gioco.giocaMagia(giocatore, model);
+  const res = await gioco.giocaMagia(giocatore, model);
   delete model._rotationChoice;
   if (res?.ok) {
     removePaidFromHand(scene, [model]);
@@ -3621,7 +3621,7 @@ async function maybeUseHumanSpostastelle(scene, modo = "difesa") {
   }
   const { card, step } = choice;
   if (step != null) card._rotationChoice = step;
-  const res = gioco.giocaMagia(player, card);
+  const res = await gioco.giocaMagia(player, card);
   delete card._rotationChoice;
   if (res?.ok) {
     removePaidFromHand(scene, [card]);
@@ -5177,7 +5177,7 @@ async function performBotAction(scene, bot, azione) {
       break;
     }
     case "gioca_magia": {
-      const res = gioco.giocaMagia(bot, azione.carta);
+      const res = await gioco.giocaMagia(bot, azione.carta);
       if (gioco.onAzione && res?.ok) gioco.onAzione(bot.nome, `Gioca magia ${azione.carta?.nome || ""}`);
       if (res?.ok) {
         const name = (azione.carta?.nome || "").toLowerCase();
