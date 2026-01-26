@@ -59,6 +59,18 @@ export class Gioco {
       ]);
     assegnaSigilli(this.giocatori);
     distribuisciManoIniziale(this.giocatori, this.mazzo_rifornimenti);
+
+    // Popola il Limbo con un numero di demoni di livello 1 pari al numero di giocatori
+    const startLimbo = this.giocatori.length;
+    const chosen = [];
+    for (let i = this.mazzo_evocazioni.carte.length - 1; i >= 0 && chosen.length < startLimbo; i -= 1) {
+      const c = this.mazzo_evocazioni.carte[i];
+      if (c instanceof Demone && (c.livello_stella || 0) === 1) {
+        chosen.push(c);
+        this.mazzo_evocazioni.carte.splice(i, 1);
+      }
+    }
+    this.limbo.push(...chosen);
   }
 
   giocatoreCorrente() {
@@ -252,6 +264,15 @@ export class Gioco {
         after: requisito,
       });
       this._emit("spostastelle_rotazione", { giocatore: pl, step, before: prevReq, after: requisito });
+      // Abaddon: se è il tuo turno, puoi ruotare di 1 ulteriore posizione nella stessa direzione
+      const hasAbaddon = (pl?.cerchia || []).some(d => (d?.nome || "").toLowerCase() === "abaddon");
+      if (hasAbaddon && this.giocatoreCorrente && this.giocatoreCorrente() === pl) {
+        const extra = step > 0 ? 1 : (step < 0 ? -1 : 0);
+        if (extra) {
+          this._rotateBoss(boss, extra, pl);
+          requisito = boss.requisitoPer(sig);
+        }
+      }
       return true; // anche se stoppato, l'azione è stata tentata
     };
 
@@ -663,7 +684,13 @@ export class Gioco {
 
   calcolaCostoEffettivo(giocatore, demone) {
     const base = demone?.costo ?? 0;
-    return base + (giocatore?.costo_extra_evocazione ?? 0);
+    let costo = base + (giocatore?.costo_extra_evocazione ?? 0);
+    const name = (demone?.nome || "").toLowerCase();
+    if (name === "yaldabaoth") {
+      const hasCerchia = (giocatore?.cerchia || []).length > 0;
+      if (!hasCerchia) costo = Math.max(0, costo - 3);
+    }
+    return costo;
   }
 
   requestAction(tipo = "generica") {
@@ -803,6 +830,7 @@ export class Gioco {
           giocatore.cerchia.splice(giocatore.cerchia.indexOf(d), 1);
           this.mandaNelLimbo(d);
           res.effetto = "limbo";
+          res.demone = d;
         }
         break;
       }
