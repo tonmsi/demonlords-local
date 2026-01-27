@@ -1,4 +1,4 @@
-ï»¿import { creaPartita } from "./engine/game.js";
+import { creaPartita } from "./engine/game.js";
 import { Demone, Imprevisto, CartaRifornimento, ElementoSimbolo } from "./engine/entities.js";
 
 const config = {
@@ -80,7 +80,7 @@ function normalizeLogMsg(msg) {
   let base = msg.replace(/\|.*$/, "");
   base = base.replace(/^Player:\s*/i, "");
   base = base.replace(/^Player\s*:\s*/i, "");
-  base = base.replace(/^\â€¢\s*/, "");
+  base = base.replace(/^\•\s*/, "");
   base = base.replace(/pesca un rifornimento/i, "pesca rifornimento");
   base = base.replace(/rivela un'?evocazione/i, "rivela evocazione");
   base = base.replace(/scarta 2 carta\/e/i, "scarta 2 carte");
@@ -543,18 +543,21 @@ function setBotVisibility(name, visible) {
 function toggleLogPanel(scene) {
   if (logPanel && logPanel.container?.active) {
     try { logPanel.container.destroy(true); } catch (_) {}
+    if (logPanel.wheelHandler && logPanel.scene?.input) {
+      try { logPanel.scene.input.off("wheel", logPanel.wheelHandler); } catch (_) {}
+    }
     logPanel = null;
     return;
   }
   const depth = 3000;
-  const width = 150;
-  const height = 450;
+  const width = 180;
+  const height = 500;
   const container = scene.add.container(1350 - width, 90).setDepth(depth);
   const bg = scene.add.rectangle(0, 0, width, height, 0x111111, 0.9)
     .setOrigin(0)
     .setInteractive({ draggable: true });
   const title = scene.add.text(8, 6, "Log azioni", { font: "16px Arial", fill: "#FFD700" });
-  const closeX = scene.add.text(width - 18, 6, "âœ–", { font: "14px Arial", fill: "#ffaaaa" }).setInteractive();
+  const closeX = scene.add.text(width - 18, 6, "X", { font: "14px Arial", fill: "#ffaaaa" }).setInteractive();
   const resizeHandle = scene.add.rectangle(width, height, 16, 16, 0x666666, 0.8)
     .setOrigin(1)
     .setStrokeStyle(1, 0xaaaaaa)
@@ -563,12 +566,17 @@ function toggleLogPanel(scene) {
   const textObj = scene.add.text(8, 26, "", {
     font: "12px Arial",
     fill: "#fff",
-    wordWrap: { width: width - 16 }
+    wordWrap: { width: width - 22 }
   }).setOrigin(0);
+  const maskShape = scene.add.rectangle(8, 26, width - 22, height - 40, 0x000000, 0).setOrigin(0);
+  textObj.setMask(maskShape.createGeometryMask());
+  const scrollTrack = scene.add.rectangle(width - 10, 26, 6, height - 40, 0x444444, 0.5).setOrigin(0);
+  const scrollThumb = scene.add.rectangle(width - 10, 26, 6, Math.max(20, (height - 40) / 4), 0xaaaaaa, 0.9).setOrigin(0).setInteractive({ draggable: true });
 
-  container.add([bg, title, textObj, closeX, resizeHandle]);
+  container.add([bg, title, textObj, maskShape, scrollTrack, scrollThumb, closeX, resizeHandle]);
   container.setSize(width, height);
   container.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
+  const maxLines = Math.max(8, Math.floor((height - 40) / 16));
 
   // Draggabile (bg e titolo) con offset per evitare salti
   let dragOffset = { x: 0, y: 0 };
@@ -605,23 +613,56 @@ function toggleLogPanel(scene) {
     resizeHandle.x = newW;
     resizeHandle.y = newH;
     closeX.x = newW - 18;
-    textObj.setWordWrapWidth(newW - 16);
+    textObj.setWordWrapWidth(newW - 22);
+    maskShape.width = newW - 22;
+    maskShape.height = newH - 40;
+    scrollTrack.x = newW - 10;
+    scrollTrack.height = newH - 40;
+    scrollThumb.x = newW - 10;
     container.setSize(newW, newH);
+    if (logPanel) {
+      logPanel.maxLines = Math.max(6, Math.floor((newH - 40) / 16));
+    }
+    refreshLogPanel();
   });
   resizeHandle.on("dragend", () => { logResizeStart = null; });
 
   closeX.on("pointerdown", () => {
-    container.destroy(true);
-    logPanel = null;
+    closeLogPanel();
   });
 
-  logPanel = { container, textObj };
+  const onWheel = (pointer, dx, dy) => {
+    if (!logPanel || !logPanel.container?.active) return;
+    const bounds = container.getBounds();
+    if (!Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y)) return;
+    const dir = dy > 0 ? 1 : -1;
+    logPanel.scrollOffset = (logPanel.scrollOffset || 0) + dir * 2;
+    refreshLogPanel();
+  };
+  scene.input.on("wheel", onWheel);
+
+  scrollThumb.on("drag", (pointer) => {
+    if (!logPanel) return;
+    const trackTop = container.y + scrollTrack.y;
+    const trackHeight = scrollTrack.height;
+    const thumbH = scrollThumb.height;
+    const newY = Phaser.Math.Clamp(pointer.y, trackTop, trackTop + trackHeight - thumbH) - container.y;
+    scrollThumb.y = newY;
+    const maxOffset = Math.max(0, actionLog.length - (logPanel.maxLines || 12));
+    const ratio = trackHeight > thumbH ? (newY - scrollTrack.y) / (trackHeight - thumbH) : 0;
+    logPanel.scrollOffset = Math.round(ratio * maxOffset);
+    refreshLogPanel();
+  });
+
+  logPanel = { container, textObj, maskShape, scrollTrack, scrollThumb, maxLines: Math.max(12, Math.floor((height - 40) / 16)), scrollOffset: 0, wheelHandler: onWheel, scene };
   refreshLogPanel();
 }
-
 function closeLogPanel() {
   if (logPanel && logPanel.container?.active) {
     try { logPanel.container.destroy(true); } catch (_) {}
+    if (logPanel.wheelHandler && logPanel.scene?.input) {
+      try { logPanel.scene.input.off("wheel", logPanel.wheelHandler); } catch (_) {}
+    }
   }
   logPanel = null;
 }
@@ -630,8 +671,25 @@ function refreshLogPanel() {
   if (!logPanel || !logPanel.container?.active) return;
   const textObj = logPanel.textObj;
   if (!textObj || !textObj.active) return;
-  const lines = actionLog.slice(-12).map(e => `â€¢ ${e}`);
+  const maxVis = logPanel.maxLines || 12;
+  const total = actionLog.length;
+  const maxOffset = Math.max(0, total - maxVis);
+  if (logPanel.scrollOffset == null) logPanel.scrollOffset = 0;
+  logPanel.scrollOffset = Math.min(Math.max(logPanel.scrollOffset, 0), maxOffset);
+  const start = Math.max(0, total - maxVis - logPanel.scrollOffset);
+  const end = start + maxVis;
+  const lines = actionLog.slice(start, end).map(e => `- ${e}`);
   textObj.setText(lines.join("\n"));
+  const track = logPanel.scrollTrack;
+  const thumb = logPanel.scrollThumb;
+  if (track && thumb) {
+    const trackH = track.height || 0;
+    const trackY = track.y;
+    const thumbH = Math.max(16, maxVis / Math.max(1, total) * trackH);
+    thumb.height = thumbH;
+    const ratio = maxOffset > 0 ? logPanel.scrollOffset / maxOffset : 0;
+    thumb.y = trackY + (trackH - thumbH) * ratio;
+  }
 }
 
 function toggleSpionePanel(scene) {
@@ -648,7 +706,7 @@ function toggleSpionePanel(scene) {
     .setOrigin(0)
     .setInteractive({ draggable: true });
   const title = scene.add.text(8, 6, "Spione (bot + prossimo boss)", { font: "16px Arial", fill: "#FFD700", wordWrap: { width: width - 16 } });
-  const closeX = scene.add.text(width - 18, 6, "âœ–", { font: "14px Arial", fill: "#ffaaaa" }).setInteractive();
+  const closeX = scene.add.text(width - 18, 6, "?", { font: "14px Arial", fill: "#ffaaaa" }).setInteractive();
   const resizeHandle = scene.add.rectangle(width, height, 16, 16, 0x666666, 0.8)
     .setOrigin(1)
     .setStrokeStyle(1, 0xaaaaaa)
@@ -699,6 +757,10 @@ function toggleSpionePanel(scene) {
     closeX.x = newW - 18;
     textObj.setWordWrapWidth(newW - 16);
     container.setSize(newW, newH);
+    if (logPanel) {
+      logPanel.maxLines = Math.max(6, Math.floor((newH - 40) / 16));
+    }
+    refreshLogPanel();
   });
   resizeHandle.on("dragend", () => { resizeStart = null; });
 
@@ -822,7 +884,7 @@ function openPlayerSettings(scene) {
     backgroundColor: "#444",
     padding: { x: 6, y: 2 }
   }).setDepth(depth + 2).setInteractive();
-  const closeX = scene.add.text(940, 140, "âœ–", {
+  const closeX = scene.add.text(940, 140, "?", {
     font: "18px Arial",
     fill: "#ffaaaa",
     backgroundColor: "#800",
@@ -1230,7 +1292,7 @@ async function drawCard(scene, tipo) {
       actionUsed = true;
       modalOpen = false; // sblocca sempre il flusso
     } else {
-      // Evocazioni e imprevisti â€” codice originale
+      // Evocazioni e imprevisti — codice originale
       cartaModel = gioco.pescaEvocazione(giocatore);
       if (cartaModel instanceof Demone) {
         pendingDemone = cartaModel;
@@ -1282,7 +1344,7 @@ async function drawCard(scene, tipo) {
   }
 
   if (usedRequest && gioco.completeAction) {
-    // Disegna/rivela consumano sempre 1 azione quando la richiesta ï¿½ stata accettata
+    // Disegna/rivela consumano sempre 1 azione quando la richiesta ? stata accettata
     gioco.completeAction(true);
   } else if (!usedRequest && actionUsed) {
     gioco.registraAzione();
@@ -1368,7 +1430,7 @@ function resolveMagicTextureKey(carta) {
 }
 
 async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
-  // Se il costo Ã¨ 0, evocazione diretta
+  // Se il costo è 0, evocazione diretta
   if (costoEffettivo <= 0) {
     return { pagamentoValido: true, selezionate: [] };
   }
@@ -1449,7 +1511,7 @@ async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
     const title = scene.add.text(180, 140, demone.nome, {
       font: "26px Arial", fill: "#fff"
     }).setDepth(depth + 2);
-    const stelle = demone?.livello_stella ? `â˜… ${demone.livello_stella}` : "";
+    const stelle = demone?.livello_stella ? `? ${demone.livello_stella}` : "";
     const costLabel = `Costo: ${costoEffettivo}` + (reqTipo ? ` (min ${reqMin} ${reqTipo})` : "");
     const reqText = scene.add.text(180, 170, costLabel, { font: "16px Arial", fill: "#ffda77" }).setDepth(depth + 2);
     const effetto = demone?.effetto ? `Effetto: ${demone.effetto}` : "";
@@ -1558,7 +1620,7 @@ async function openPaymentDialog(scene, giocatore, demone, costoEffettivo) {
       padding: { x: 12, y: 6 }
     }).setDepth(depth + 2).setInteractive();
 
-    const closeX = scene.add.text(920, 130, "âœ–", {
+    const closeX = scene.add.text(920, 130, "?", {
       font: "20px Arial",
       fill: "#ffaaaa",
       backgroundColor: "#800",
@@ -1780,7 +1842,7 @@ async function handleScartiPrelevati(scene, giocatore, carte = []) {
 function chooseDemoneForIlluminazione(scene, giocatore) {
   const cerchia = (giocatore?.cerchia || []).filter(d => d instanceof Demone);
   if (!cerchia.length) return Promise.resolve(null);
-  // BOT: sceglie il demone con livello piÃ¹ alto
+  // BOT: sceglie il demone con livello più alto
   if (giocatore?.isBot) {
     return Promise.resolve(cerchia.slice().sort((a,b)=> (b.livello_stella||0)-(a.livello_stella||0))[0]);
   }
@@ -1819,7 +1881,7 @@ function openIlluminazioneDialog(scene, demoni) {
         fill: "#fff"
       }).setOrigin(0.5).setDepth(depth + 2);
       attachTooltip(img, () => demoneTooltipText(d), { growDown: true });
-      const mark = scene.add.text(cx + 42, cy - 70, "âœ”", {
+      const mark = scene.add.text(cx + 42, cy - 70, "?", {
         font: "18px Arial",
         fill: "#FFD700",
         stroke: "#000",
@@ -2025,7 +2087,7 @@ async function nemeaEffect(scene, giocatore) {
   if (c && !giocatore?.isBot) addCardToHand(scene, c, { silent: true });
   const isElemento = (c?.categoria || "").toLowerCase() === "energia";
   if (isElemento && gioco.scarti.length) {
-    // prende la carta piÃ¹ alta dagli scarti
+    // prende la carta più alta dagli scarti
     const best = [...gioco.scarti].filter(x => x?.valore != null).sort((a,b)=> (b.valore||0)-(a.valore||0))[0] || gioco.scarti[0];
     if (best) {
       const idx = gioco.scarti.lastIndexOf(best);
@@ -2063,7 +2125,7 @@ async function nefeleEffect(scene, giocatore) {
   if (c && !giocatore?.isBot) addCardToHand(scene, c, { silent: true });
   const isAria = (c?.tipi || []).includes("ENERGIA_ARIA") || c?.tipo === "ENERGIA_ARIA";
   if (isAria) {
-    // Ruba la carta piÃ¹ alta dalla mano avversaria piÃ¹ ricca
+    // Ruba la carta più alta dalla mano avversaria più ricca
     const opp = (gioco.giocatori || []).filter(p => p !== giocatore).sort((a,b)=> (b.mano.length||0)-(a.mano.length||0))[0];
     if (opp && opp.mano.length) {
       opp.mano.sort((a,b)=> (b.valore||0)-(a.valore||0));
@@ -2794,7 +2856,7 @@ async function azaelEffect(scene, giocatore) {
     const c = target.mano.splice(idx, 1)[0];
     if (c) { stolen.push(c); giocatore.mano.push(c); }
   }
-  // restituisci 1 carta (la piÃ¹ bassa) al target
+  // restituisci 1 carta (la più bassa) al target
   if (stolen.length) {
     const giveBack = stolen.sort((a,b)=> (a.valore||0)-(b.valore||0))[0];
     const idx = giocatore.mano.indexOf(giveBack);
@@ -3092,7 +3154,7 @@ async function arimaneAction(scene, giocatore, demone) {
   if (!others.length) return false;
   let target = null;
   if (giocatore.isBot) {
-    target = others[0];
+    target = others.find(d => (d?.nome || "").toLowerCase().includes("orias")) || others[0];
   } else {
     target = await openDemonChoiceDialog(scene, others.map(d => ({ demone: d, owner: giocatore, loc: "cerchia" })), "Arimane: scegli un tuo demone per usare l'entrata");
   }
@@ -3125,8 +3187,8 @@ async function valakAction(scene, giocatore, demone) {
 
 async function leviatanoAction(scene, giocatore, demone) {
   if (!gioco?.scarti?.length) return false;
-  const idx = Math.floor(Math.random() * gioco.scarti.length);
-  const card = gioco.scarti.splice(idx, 1)[0];
+  const pickIdx = Math.floor(Math.random() * gioco.scarti.length);
+  const card = gioco.scarti.splice(pickIdx, 1)[0];
   if (card) {
     giocatore.mano.push(card);
     if (!giocatore.isBot) addCardToHand(scene, card, { silent: true });
@@ -3146,7 +3208,7 @@ async function maybeActivateDemoneAzione(scene, demone, proprietario) {
     return;
   }
   if (demone._action_used_turn === gioco.turno_corrente) {
-    showBotBalloon(scene, "Sistema", "Azione giÃ  usata in questo turno", 625, 600);
+    showBotBalloon(scene, "Sistema", "Azione già usata in questo turno", 625, 600);
     return;
   }
   let usedRequest = false;
@@ -3172,7 +3234,10 @@ async function maybeActivateDemoneAzione(scene, demone, proprietario) {
   if (!ok) {
     showBotBalloon(scene, "Sistema", "Azione non disponibile", 625, 600);
   }
-  if (ok) demone._action_used_turn = gioco.turno_corrente;
+  if (ok) {
+    demone._action_used_turn = gioco.turno_corrente;
+    pushLog(`${proprietario.nome} attiva azione: ${demone.nome}`);
+  }
   if (usedRequest && gioco.completeAction) gioco.completeAction(!!ok);
   else if (ok) gioco.registraAzione();
   refreshUI(scene);
@@ -3289,7 +3354,7 @@ async function openBabiChoice(scene, pool) {
         fill: "#fff"
       }).setOrigin(0.5).setDepth(depth + 2);
       attachTooltip(img, () => demoneTooltipText(d), { growDown: true });
-      const mark = scene.add.text(cx + 36, cy - 60, "âœ”", {
+      const mark = scene.add.text(cx + 36, cy - 60, "?", {
         font: "16px Arial",
         fill: "#FFD700",
         stroke: "#000",
@@ -3474,7 +3539,7 @@ async function openJakalopeChoice(scene, cards) {
         font: "12px Arial",
         fill: "#fff"
       }).setOrigin(0.5).setDepth(depth + 2);
-      const mark = scene.add.text(cx + 36, cy - 60, "â˜…", {
+      const mark = scene.add.text(cx + 36, cy - 60, "?", {
         font: "16px Arial",
         fill: "#FFD700",
         stroke: "#000",
@@ -3549,7 +3614,7 @@ async function openPranayamaChoice(scene, cards, recipientName = "avversario") {
         font: "13px Arial",
         fill: "#fff"
       }).setOrigin(0.5).setDepth(depth + 2);
-      const mark = scene.add.text(cx + 42, cy - 70, "â˜…", {
+      const mark = scene.add.text(cx + 42, cy - 70, "?", {
         font: "18px Arial",
         fill: "#FFD700",
         stroke: "#000",
@@ -3601,7 +3666,7 @@ function pickLowestEnergyOrAny(handArr) {
     const isEtereB = (b?.tipo === "ENERGIA_ETERE") || (b?.tipi || []).includes("ENERGIA_ETERE");
     const va = typeof a?.valore === "number" ? a.valore : 99;
     const vb = typeof b?.valore === "number" ? b.valore : 99;
-    // Penalizza etere: scartale per ultime a paritÃ  di valore
+    // Penalizza etere: scartale per ultime a parità di valore
     if (isEtereA && !isEtereB) return 1;
     if (!isEtereA && isEtereB) return -1;
     return va - vb;
@@ -3651,7 +3716,7 @@ async function jinnEffect(scene, giocatore, demone) {
         if (stars < req && afterBuff >= req) return true; // +2 permette la conquista
         if (req - stars <= 2) return true; // avvicinati al requisito
       }
-      // Evita di pescare se la mano A" giâ€¦ piena
+      // Evita di pescare se la mano A" gi… piena
       if (handLen >= 6) return true;
       return false;
     })();
@@ -3705,7 +3770,7 @@ function openJinnChoice(scene, demone) {
       backgroundColor: "#444",
       padding: { x: 14, y: 8 }
     }).setDepth(depth + 2).setInteractive({ useHandCursor: true });
-    const closeX = scene.add.text(830, 270, "âœ–", {
+    const closeX = scene.add.text(830, 270, "?", {
       font: "18px Arial",
       fill: "#ffaaaa",
       backgroundColor: "#800",
@@ -3764,7 +3829,7 @@ function openStolasChoice(scene, carte) {
         fill: "#fff"
       }).setOrigin(0.5).setDepth(depth + 2);
       attachTooltip(img, () => magiaTooltipText(c), { growDown: true });
-      const mark = scene.add.text(cx + 42, cy - 70, "âœ”", {
+      const mark = scene.add.text(cx + 42, cy - 70, "?", {
         font: "18px Arial",
         fill: "#FFD700",
         stroke: "#000",
@@ -3808,7 +3873,7 @@ function openStolasChoice(scene, carte) {
 
 function truncateText(text, maxLen = 12) {
   if (text.length <= maxLen) return text;
-  return text.substring(0, maxLen - 1) + "â€¦";
+  return text.substring(0, maxLen - 1) + "…";
 }
 
 function addCardOverlay(scene, card, cartaModel, offset = 45) {
@@ -4056,12 +4121,12 @@ function magiaTooltipText(c) {
       const sig = attacker?.sigillo;
       const revealed = !!boss?.rivelato;
       if (revealed) {
-        const ops = az.rotazione.opzioni.map(n => (n < 0 ? `â†» ${Math.abs(n)}` : `â†· ${n}`)).join(", ");
+        const ops = az.rotazione.opzioni.map(n => (n < 0 ? `? ${Math.abs(n)}` : `? ${n}`)).join(", ");
         extra = `\nRotazione Boss: ${ops}`;
         const previews = (az.rotazione.opzioni || []).map(step => {
           const { before, after } = simulateReqAfterRotation(boss, sig, step);
-          const dir = step < 0 ? "â†»" : "â†·";
-          return `${dir} ${Math.abs(step)}: ${before} â†’ ${after}`;
+          const dir = step < 0 ? "?" : "?";
+          return `${dir} ${Math.abs(step)}: ${before} ? ${after}`;
         });
         if (previews.length) {
           extra += `\nRequisito Attaccante:\n${previews.join("\n")}`;
@@ -4086,7 +4151,7 @@ async function playMagicCard(scene, card) {
   if ((model?.categoria || "").toLowerCase() !== "magia") return;
   const giocatore = gioco.giocatoreCorrente();
   if (!giocatore || giocatore.nome !== "Player") {
-    showBotBalloon(scene, "Sistema", "Non Ã¨ il tuo turno", 625, 600);
+    showBotBalloon(scene, "Sistema", "Non è il tuo turno", 625, 600);
     return;
   }
   if (!giocatore.mano.includes(model)) {
@@ -4109,8 +4174,9 @@ async function playMagicCard(scene, card) {
     if (gioco.completeAction) gioco.completeAction(false);
     return;
   }
+  pushLog(`Player gioca magia: ${model.nome}`);
 
-  // Gestisci scelta rotazione per spostastelle se ci sono piÃ¹ opzioni
+  // Gestisci scelta rotazione per spostastelle se ci sono più opzioni
   if (model?.azione_boss?.rotazione?.opzioni && model.azione_boss.rotazione.opzioni.length > 1) {
     const opts = model.azione_boss.rotazione.opzioni;
     const choice = await askRotationChoice(scene, opts);
@@ -4137,9 +4203,10 @@ async function playMagicCard(scene, card) {
   const res = await gioco.giocaMagia(giocatore, model);
   delete model._rotationChoice;
   if (res?.ok) {
+    pushLog(`Player attiva magia: ${model.nome}`);
     removePaidFromHand(scene, [model]);
     showBotBalloon(scene, "Player", `Player usa ${model.nome}`, 625, 600, 0x1e90ff);
-    showBotBalloon(scene, "Player", `Gioca ${model.nome} â€¢ ${res.effetto || "Effetto attivato"}`, 625, 600);
+    showBotBalloon(scene, "Player", `Gioca ${model.nome} • ${res.effetto || "Effetto attivato"}`, 625, 600);
     await maybeHandleIlluminazione(scene, giocatore, model);
     if (gioco.completeAction) gioco.completeAction(true);
     else gioco.registraAzione();
@@ -4163,7 +4230,7 @@ function askYesNo(scene, message) {
       wordWrap: { width: 360, useAdvancedWrap: true },
       align: "center"
     }).setOrigin(0.5).setDepth(depth + 2);
-    const yesBtn = scene.add.text(565, 390, "SÃ¬", {
+    const yesBtn = scene.add.text(565, 390, "Sì", {
       font: "18px Arial",
       fill: "#fff",
       backgroundColor: "#3a9c4f",
@@ -4207,7 +4274,7 @@ function askRotationChoice(scene, options = []) {
     const startY = 340;
     const spacingX = 70;
     options.forEach((opt, idx) => {
-      const label = opt < 0 ? `â†» ${Math.abs(opt)}` : `â†· ${opt}`;
+      const label = opt < 0 ? `? ${Math.abs(opt)}` : `? ${opt}`;
       const btn = scene.add.text(startX + idx * spacingX, startY, label, {
         font: "16px Arial",
         fill: "#fff",
@@ -4261,7 +4328,7 @@ async function handlePranayamaHuman(scene, giocatore, cartaMagia) {
   if (reveal.length >= 3 && recipient) {
     give = await openPranayamaChoice(scene, reveal, recipient.nome);
     if (!give) {
-      // fallback: carta con valore piÃ¹ basso
+      // fallback: carta con valore più basso
       give = reveal.slice().sort((a,b)=> (a.valore||0)-(b.valore||0))[0];
     }
   }
@@ -4351,7 +4418,7 @@ function openSpostaDialog(scene, boss, attacker, carte, modo, opts = {}) {
       Array.from(set).forEach(s => {
         if (Math.abs(s) === 2) {
           const sign = Math.sign(s) || 1;
-          set.add(1 * sign); // aggiungi +/-1 se c'Ã¨ +/-2
+          set.add(1 * sign); // aggiungi +/-1 se c'è +/-2
         }
       });
       return Array.from(set);
@@ -4577,7 +4644,7 @@ async function openWindigoSacrificeDialog(scene, demoni) {
         fill: "#fff"
       }).setOrigin(0.5).setDepth(depth + 2);
       attachTooltip(img, () => demoneTooltipText(d), { growDown: true });
-      const mark = scene.add.text(cx + 42, cy - 70, "â˜…", {
+      const mark = scene.add.text(cx + 42, cy - 70, "?", {
         font: "18px Arial",
         fill: "#FFD700",
         stroke: "#000",
@@ -4633,7 +4700,7 @@ function addCardToHand(scene, cartaModel, options = {}) {
   const isStoppa = !!cartaModel?.azione_boss?.annulla; // Stoppastella (annulla)
   attachTooltip(card, () => isMagic ? magiaTooltipText(cartaModel) : demoneTooltipText(cartaModel));
   const slotIndex = hand.length;
-  hand.push(card); // registra subito cosÃ¬ gli slot non si sovrappongono
+  hand.push(card); // registra subito così gli slot non si sovrappongono
   const targetX = 50 + slotIndex * 90;
   const targetY = 650;
 
@@ -4702,7 +4769,7 @@ function addCardToHand(scene, cartaModel, options = {}) {
     });
   }
 
-  // InterattivitÃ  per magie: evidenziazione hover e click per attivare (ignora spostastelle/stoppastella)
+  // Interattività per magie: evidenziazione hover e click per attivare (ignora spostastelle/stoppastella)
   
   if (isMagic) {
     card.setInteractive({ useHandCursor: true });
@@ -4790,7 +4857,7 @@ function syncHumanHand(scene) {
   const player = gioco.giocatori.find(p => p.nome === "Player");
   if (!player) return;
   
-  // Rimuovi carte che non sono piÃ¹ nella mano del giocatore
+  // Rimuovi carte che non sono più nella mano del giocatore
   hand = hand.filter(sprite => {
     if (!player.mano.includes(sprite._model)) {
       if (sprite._overlay) sprite._overlay.destroy();
@@ -4888,7 +4955,7 @@ function syncLimboSprites(scene) {
     }
   });
 
-  // distruggi sprite non piÃ¹ necessari
+  // distruggi sprite non più necessari
   pool.forEach(sprite => {
     try { sprite._overlay?.destroy(); } catch (_) {}
     try { sprite._valueOverlay?.destroy(); } catch (_) {}
@@ -4909,7 +4976,7 @@ function syncBotCerchiaSprites(scene) {
   if (!gioco) return;
   gioco.giocatori.filter(g => g.isBot).forEach(bot => {
     const arr = botCerchiaSprites[bot.nome] || (botCerchiaSprites[bot.nome] = []);
-    // Rimuovi sprite non piÃ¹ presenti
+    // Rimuovi sprite non più presenti
     const filtered = [];
     const seen = new Set();
     arr.forEach(sprite => {
@@ -4951,7 +5018,7 @@ function syncBotCerchiaSprites(scene) {
 
     // Aggiungi mancanti
     const pos = botPositions[bot.nome];
-    const spacing = 75; // leggermente piÃ¹ distanza tra carte
+    const spacing = 75; // leggermente più distanza tra carte
     bot.cerchia.forEach((d, idx) => {
       if (!filtered.find(s => s._model === d) && !d._cerchiaAnimating && !d._cerchiaHasSprite) {
         const texture = getTextureForCard(d, "demone");
@@ -4983,7 +5050,7 @@ function syncBotCerchiaSprites(scene) {
 }
 
 function placeInLimbo(scene, cartaModel) {
-  // Se esiste giAÂ  uno sprite per questa carta, riallinea e basta
+  // Se esiste giA  uno sprite per questa carta, riallinea e basta
   const existing = limboSprites.find(s => s._model === cartaModel);
   if (existing) {
     layoutLimboSprites(scene);
@@ -5271,7 +5338,7 @@ function removeDemoneFromLimbo(scene, demone) {
   if (idx != null && idx >= 0) {
     gioco.limbo.splice(idx, 1);
   }
-  // Rimuovi eventuale sprite in limbo giÃ  presente
+  // Rimuovi eventuale sprite in limbo già presente
   const sIdx = limboSprites.findIndex(s => s._model === demone);
   if (sIdx >= 0) {
     const [sprite] = limboSprites.splice(sIdx, 1);
@@ -5363,7 +5430,7 @@ function clearTempStarBonuses(giocatore) {
   });
 }
 
-// ðŸ”§ FIX REQUEST:
+// ?? FIX REQUEST:
 // When a demon card is summoned to the player's circle (like "Boto Cor de Rosa"),
 // it appears in the wrong position or duplicates on screen.
 // Please ensure that demon cards are added to the player's circle ONLY ONCE,
@@ -5372,17 +5439,17 @@ function clearTempStarBonuses(giocatore) {
 function addCerchiaSprite(scene, demone, owner = null) {
   const proprietario = owner || gioco?.giocatoreCorrente?.() || null;
 
-  // Se il proprietario Ã¨ un bot, usa lâ€™animazione dedicata e basta
+  // Se il proprietario è un bot, usa l’animazione dedicata e basta
   if (proprietario && proprietario.isBot) {
     animateBotEvocaDemone(scene, proprietario, demone);
     return;
   }
 
-  // âœ… Evita duplicazioni: controlla se la carta Ã¨ giÃ  presente nella cerchia
+  // ? Evita duplicazioni: controlla se la carta è già presente nella cerchia
   const existing = cerchiaSprites.find(s => s._model === demone);
-  if (existing) return; // giÃ  disegnata, esci subito
+  if (existing) return; // già disegnata, esci subito
 
-  // Calcola la posizione: se ci sono giÃ  demoni, posiziona a destra dell'ultimo
+  // Calcola la posizione: se ci sono già demoni, posiziona a destra dell'ultimo
   const slots = (ui && ui.human && ui.human.cerchiaSlots) || [];
   const idx = cerchiaSprites.length;
   
@@ -5413,7 +5480,7 @@ function addCerchiaSprite(scene, demone, owner = null) {
   addCardOverlay(scene, card, demone, 45);
   attachTooltip(card, () => demoneTooltipText(demone));
 
-  // InterattivitÃ  per demoni azione (solo umano)
+  // Interattività per demoni azione (solo umano)
   const isActionDemon = ((demone?.tipo_effetto || "").toLowerCase() === "azione");
   if (isActionDemon) {
     card.setInteractive({ useHandCursor: true });
@@ -5447,7 +5514,7 @@ function addCerchiaSprite(scene, demone, owner = null) {
   }
 
   // Aggiungi subito all'array senza chiamare layoutHumanCerchia
-  // (verrÃ  chiamato automaticamente da refreshUI)
+  // (verrà chiamato automaticamente da refreshUI)
   cerchiaSprites.push(card);
 }
 
@@ -5781,6 +5848,22 @@ async function runBotTurn(scene, bot) {
       await sleep(BOT_ACTION_DELAY);
       continue;
     }
+    const planArimane = await maybeBotPlanArimaneOrias(scene, bot, actionNum, usedRequest);
+    if (planArimane) {
+      await sleep(BOT_ACTION_DELAY);
+      continue;
+    }
+    const planBoto = await maybeBotPlanBotoCombo(scene, bot, actionNum, usedRequest);
+    if (planBoto === true) {
+      await sleep(BOT_ACTION_DELAY);
+      continue;
+    }
+    if (planBoto && planBoto.tipo) {
+      await performBotAction(scene, bot, planBoto);
+      refreshUI(scene);
+      await sleep(BOT_ACTION_DELAY);
+      continue;
+    }
     const usedBuffAction = await maybeBotUseBuffAction(scene, bot, actionNum, usedRequest);
     if (usedBuffAction) {
       await sleep(BOT_ACTION_DELAY);
@@ -5795,7 +5878,7 @@ async function runBotTurn(scene, bot) {
     await performBotAction(scene, bot, azione);
     refreshUI(scene);
     if (usedRequest && gioco.completeAction) {
-      // L'azione Ã¨ giÃ  stata conteggiata dentro performBotAction (registraAzione),
+      // L'azione è già stata conteggiata dentro performBotAction (registraAzione),
       // qui completiamo solo per chiudere lo stato requestAction senza consumare di nuovo.
       gioco.completeAction(false);
     }
@@ -5811,13 +5894,13 @@ function decideBotAction(bot) {
     return { tipo: "conquista_boss" };
   }
 
-  // Gioca una magia se presente (prioritÃ )
+  // Gioca una magia se presente (priorità)
   const magia = (bot.mano || []).find(c => (c?.categoria || "").toLowerCase() === "magia");
   if (magia) {
     return { tipo: "gioca_magia", carta: magia };
   }
 
-  // Se nel Limbo c'Ã¨ un demone pagabile che aumenta le stelle, prova a evocarlo
+  // Se nel Limbo c'è un demone pagabile che aumenta le stelle, prova a evocarlo
   const payLimbo = findAffordableLimbo(bot);
   if (payLimbo && actionNum <= 2) {
     return { tipo: "paga_limbo", carta: payLimbo };
@@ -5839,7 +5922,7 @@ function decideBotActionV2(bot) {
   }
   if (canBotConquerBoss(bot, boss)) {
     if (boss && !boss.rivelato) {
-      // Boss coperto: attacca solo se hai spostastelle vincente, oppure in base a probabilitÅ• di azzardo
+      // Boss coperto: attacca solo se hai spostastelle vincente, oppure in base a probabilitr di azzardo
       if (hasWinningSposta(bot, boss)) {
         return { tipo: "conquista_boss" };
       }
@@ -5979,7 +6062,7 @@ async function maybeBotCoverGambits(scene, bot, actionNum, usedRequest = false) 
   const stars = bot.totale_stelle || 0;
   const hasSposta = (bot.mano || []).some(c => c?.azione_boss);
 
-  // Pianifica Bafometto su boss coperto: usa buff se l'azzardo Ä‚Â¨ accettabile
+  // Pianifica Bafometto su boss coperto: usa buff se l'azzardo A¨ accettabile
   if (actionNum === 1) {
     const baf = (bot.cerchia || []).find(d => {
       const n = (d?.nome || "").toLowerCase();
@@ -6049,13 +6132,75 @@ async function maybeBotCoverGambits(scene, bot, actionNum, usedRequest = false) 
   return false;
 }
 
+async function maybeBotPlanArimaneOrias(scene, bot, actionNum, usedRequest = false) {
+  if (!bot) return false;
+  const boss = gioco?.prossimoBoss ? gioco.prossimoBoss() : null;
+  if (!boss || !boss.rivelato || !bot.sigillo) return false;
+  const req = boss.requisitoPer ? boss.requisitoPer(bot.sigillo) : bossRequirement(bot, boss);
+  if (req == null) return false;
+  const canWin = (bot.totale_stelle || 0) >= req || hasWinningSposta(bot, boss);
+  if (!canWin) return false;
+  const arimane = (bot.cerchia || []).find(d => (d?.nome || "").toLowerCase().includes("arimane") && (d?.tipo_effetto || "").toLowerCase() === "azione" && d._action_used_turn !== gioco.turno_corrente);
+  const orias = (bot.cerchia || []).find(d => (d?.nome || "").toLowerCase().includes("orias"));
+  if (!arimane || !orias) return false;
+  if (actionNum !== 1) return false;
+
+  const ok = await eseguiAzioneDemone(scene, bot, arimane);
+  if (ok) {
+    arimane._action_used_turn = gioco.turno_corrente;
+    bot._planAttackNext = true;
+    if (usedRequest && gioco.completeAction) gioco.completeAction(true);
+    else gioco.registraAzione();
+    refreshUI(scene);
+    return true;
+  }
+  return false;
+}
+
+async function maybeBotPlanBotoCombo(scene, bot, actionNum, usedRequest = false) {
+  if (!bot) return false;
+  if (actionNum === 1) {
+    const hasBoto = (bot.cerchia || []).some(d => (d?.nome || "").toLowerCase().includes("boto cor de rosa"));
+    if (!hasBoto) {
+      const targetAction = (bot.cerchia || []).find(d => {
+        const n = (d?.nome || "").toLowerCase();
+        const isAction = (d?.tipo_effetto || "").toLowerCase() === "azione";
+        return isAction && (n.includes("kelpie") || n.includes("banshee")) && d._action_used_turn !== gioco.turno_corrente;
+      });
+      const boto = (gioco?.limbo || []).find(d => (d?.nome || "").toLowerCase().includes("boto cor de rosa"));
+      if (targetAction && boto) {
+        const costo = gioco.calcolaCostoEffettivo(bot, boto);
+        const pagate = bot.trovaPagamento(costo, boto.costo_tipo, boto.costo_tipo_minimo);
+        if (pagate && pagate.length) {
+          bot._planUseDemoneAction = targetAction;
+          return { tipo: "paga_limbo", carta: boto };
+        }
+      }
+    }
+  }
+  if (actionNum === 2 && bot._planUseDemoneAction) {
+    const dem = bot._planUseDemoneAction;
+    bot._planUseDemoneAction = null;
+    if ((dem?._action_used_turn) === gioco.turno_corrente) return false;
+    const ok = await eseguiAzioneDemone(scene, bot, dem);
+    if (ok) {
+      dem._action_used_turn = gioco.turno_corrente;
+      if (usedRequest && gioco.completeAction) gioco.completeAction(true);
+      else gioco.registraAzione();
+      refreshUI(scene);
+      return true;
+    }
+  }
+  return false;
+}
+
 async function maybeBotUseDrawAction(scene, bot, actionNum, usedRequest = false) {
   if (!bot) return false;
   const maxHand = 6;
   const handLen = (bot.mano || []).length;
   const hasSpace = (gain) => handLen + gain <= maxHand;
   const gainMap = (name) => {
-    if (name === "mammon") return 3; // media stimata, puÃ² arrivare a 6
+    if (name === "mammon") return 3; // media stimata, può arrivare a 6
     if (name === "nekomata") return 3;
     if (name === "orione") return 2;
     if (name === "zin") return 1;
@@ -6069,7 +6214,7 @@ async function maybeBotUseDrawAction(scene, bot, actionNum, usedRequest = false)
   const prioritized = candidates.filter(d => {
     const n = (d?.nome || "").toLowerCase();
     if (n.includes("huli")) {
-      // Usa Huli solo se serve davvero e c'Ã¨ uno Spostastelle negli scarti
+      // Usa Huli solo se serve davvero e c'è uno Spostastelle negli scarti
       return hasSpostaInScarti && !botHasSposta;
     }
     return ["mammon", "orione", "nekomata", "zin", "leviatano"].some(k => n.includes(k));
@@ -6078,7 +6223,7 @@ async function maybeBotUseDrawAction(scene, bot, actionNum, usedRequest = false)
   for (const dem of prioritized) {
     const name = (dem?.nome || "").toLowerCase();
     const gain = gainMap(name);
-    // preferisci usarle alla prima azione o se c'Ã¨ spazio in mano
+    // preferisci usarle alla prima azione o se c'è spazio in mano
     if (actionNum > 1 && handLen >= 5) continue;
     if (!hasSpace(Math.max(1, gain))) continue;
     const ok = await eseguiAzioneDemone(scene, bot, dem);
@@ -6163,6 +6308,7 @@ async function performBotAction(scene, bot, azione) {
       const res = await gioco.giocaMagia(bot, azione.carta);
       if (gioco.onAzione && res?.ok) gioco.onAzione(bot.nome, `Gioca magia ${azione.carta?.nome || ""}`);
       if (res?.ok) {
+        pushLog(`${bot.nome} attiva magia: ${azione.carta?.nome || "magia"}`);
         const name = (azione.carta?.nome || "").toLowerCase();
         const pos = botPositions[bot.nome] || { x: 625, y: 360 };
         showBotBalloon(scene, bot.nome, `${bot.nome} usa ${azione.carta?.nome || "una magia"}`, pos.x, pos.y, 0x1e90ff);
@@ -6681,7 +6827,7 @@ function bossRequirement(bot, boss) {
 function findAffordableLimbo(bot) {
   if (!gioco?.limbo?.length) return null;
   const actionNum = (gioco?.azione_corrente || 0) + 1;
-  // Sinergia Boto cor de Rosa + (Windigo/Kelpie/Banshee): se serve, prioritÅ• Boto
+  // Sinergia Boto cor de Rosa + (Windigo/Kelpie/Banshee): se serve, prioritr Boto
   const hasComboTarget = (bot.cerchia || []).some(d => {
     const n = (d?.nome || "").toLowerCase();
     return n.includes("windigo") || n.includes("kelpie") || n.includes("banshee");
@@ -7023,3 +7169,4 @@ function updateCemeteryUI(scene) {
   const has = (gioco?.cimitero?.length || 0) > 0;
   cemeteryPileSprite.setTexture(has ? "cemetery_pile" : "cemetery_empty");
 }
+
