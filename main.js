@@ -542,121 +542,42 @@ function setBotVisibility(name, visible) {
 
 function toggleLogPanel(scene) {
   if (logPanel && logPanel.container?.active) {
-    try { logPanel.container.destroy(true); } catch (_) {}
-    if (logPanel.wheelHandler && logPanel.scene?.input) {
-      try { logPanel.scene.input.off("wheel", logPanel.wheelHandler); } catch (_) {}
-    }
-    logPanel = null;
+    closeLogPanel();
     return;
   }
   const depth = 3000;
-  const width = 180;
-  const height = 500;
+  const width = 220;
+  const height = 520;
   const container = scene.add.container(1350 - width, 90).setDepth(depth);
-  const bg = scene.add.rectangle(0, 0, width, height, 0x111111, 0.9)
-    .setOrigin(0)
-    .setInteractive({ draggable: true });
+  const bg = scene.add.rectangle(0, 0, width, height, 0x111111, 0.9).setOrigin(0).setInteractive({ draggable: true });
   const title = scene.add.text(8, 6, "Log azioni", { font: "16px Arial", fill: "#FFD700" });
+  title.setInteractive({ draggable: true });
   const closeX = scene.add.text(width - 18, 6, "X", { font: "14px Arial", fill: "#ffaaaa" }).setInteractive();
-  const resizeHandle = scene.add.rectangle(width, height, 16, 16, 0x666666, 0.8)
-    .setOrigin(1)
-    .setStrokeStyle(1, 0xaaaaaa)
-    .setInteractive({ draggable: true });
-
-  const textObj = scene.add.text(8, 26, "", {
-    font: "12px Arial",
-    fill: "#fff",
-    wordWrap: { width: width - 22 }
-  }).setOrigin(0);
-  const maskShape = scene.add.rectangle(8, 26, width - 22, height - 40, 0x000000, 0).setOrigin(0);
-  textObj.setMask(maskShape.createGeometryMask());
-  const scrollTrack = scene.add.rectangle(width - 10, 26, 6, height - 40, 0x444444, 0.5).setOrigin(0);
-  const scrollThumb = scene.add.rectangle(width - 10, 26, 6, Math.max(20, (height - 40) / 4), 0xaaaaaa, 0.9).setOrigin(0).setInteractive({ draggable: true });
-
-  container.add([bg, title, textObj, maskShape, scrollTrack, scrollThumb, closeX, resizeHandle]);
+  const textObj = scene.add.text(8, 28, "", { font: "12px Arial", fill: "#fff", wordWrap: { width: width - 16 } }).setOrigin(0);
+  container.add([bg, title, textObj, closeX]);
   container.setSize(width, height);
   container.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
-  const maxLines = Math.max(8, Math.floor((height - 40) / 16));
 
-  // Draggabile (bg e titolo) con offset per evitare salti
+  // drag
   let dragOffset = { x: 0, y: 0 };
   scene.input.setDraggable(bg);
-  bg.on("dragstart", (pointer) => {
-    dragOffset = { x: pointer.x - container.x, y: pointer.y - container.y };
-  });
-  bg.on("drag", (pointer) => {
-    container.x = pointer.x - dragOffset.x;
-    container.y = pointer.y - dragOffset.y;
-  });
-  title.setInteractive({ draggable: true });
   scene.input.setDraggable(title);
-  title.on("dragstart", (pointer) => {
-    dragOffset = { x: pointer.x - container.x, y: pointer.y - container.y };
-  });
-  title.on("drag", (pointer) => {
+  const dragFn = (pointer) => {
     container.x = pointer.x - dragOffset.x;
     container.y = pointer.y - dragOffset.y;
-  });
-
-  // Ridimensionabile con offset
-  scene.input.setDraggable(resizeHandle);
-  let logResizeStart = null;
-  resizeHandle.on("dragstart", (pointer) => {
-    logResizeStart = { x: pointer.x, y: pointer.y, w: bg.width, h: bg.height };
-  });
-  resizeHandle.on("drag", (pointer) => {
-    if (!logResizeStart) return;
-    const newW = Math.max(200, logResizeStart.w + (pointer.x - logResizeStart.x));
-    const newH = Math.max(160, logResizeStart.h + (pointer.y - logResizeStart.y));
-    bg.width = newW;
-    bg.height = newH;
-    resizeHandle.x = newW;
-    resizeHandle.y = newH;
-    closeX.x = newW - 18;
-    textObj.setWordWrapWidth(newW - 22);
-    maskShape.width = newW - 22;
-    maskShape.height = newH - 40;
-    scrollTrack.x = newW - 10;
-    scrollTrack.height = newH - 40;
-    scrollThumb.x = newW - 10;
-    container.setSize(newW, newH);
-    if (logPanel) {
-      logPanel.maxLines = Math.max(6, Math.floor((newH - 40) / 16));
-    }
-    refreshLogPanel();
-  });
-  resizeHandle.on("dragend", () => { logResizeStart = null; });
-
-  closeX.on("pointerdown", () => {
-    closeLogPanel();
-  });
-
-  const onWheel = (pointer, dx, dy) => {
-    if (!logPanel || !logPanel.container?.active) return;
-    const bounds = container.getBounds();
-    if (!Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y)) return;
-    const dir = dy > 0 ? 1 : -1;
-    logPanel.scrollOffset = (logPanel.scrollOffset || 0) + dir * 2;
-    refreshLogPanel();
   };
-  scene.input.on("wheel", onWheel);
+  bg.on("dragstart", (pointer) => { dragOffset = { x: pointer.x - container.x, y: pointer.y - container.y }; });
+  title.on("dragstart", (pointer) => { dragOffset = { x: pointer.x - container.x, y: pointer.y - container.y }; });
+  bg.on("drag", dragFn);
+  title.on("drag", dragFn);
 
-  scrollThumb.on("drag", (pointer) => {
-    if (!logPanel) return;
-    const trackTop = container.y + scrollTrack.y;
-    const trackHeight = scrollTrack.height;
-    const thumbH = scrollThumb.height;
-    const newY = Phaser.Math.Clamp(pointer.y, trackTop, trackTop + trackHeight - thumbH) - container.y;
-    scrollThumb.y = newY;
-    const maxOffset = Math.max(0, actionLog.length - (logPanel.maxLines || 12));
-    const ratio = trackHeight > thumbH ? (newY - scrollTrack.y) / (trackHeight - thumbH) : 0;
-    logPanel.scrollOffset = Math.round(ratio * maxOffset);
-    refreshLogPanel();
-  });
+  // close
+  closeX.on("pointerdown", () => closeLogPanel());
 
-  logPanel = { container, textObj, maskShape, scrollTrack, scrollThumb, maxLines: Math.max(12, Math.floor((height - 40) / 16)), scrollOffset: 0, wheelHandler: onWheel, scene };
+  logPanel = { container, textObj, maxLines: 32, scrollOffset: 0 };
   refreshLogPanel();
 }
+
 function closeLogPanel() {
   if (logPanel && logPanel.container?.active) {
     try { logPanel.container.destroy(true); } catch (_) {}
@@ -671,25 +592,11 @@ function refreshLogPanel() {
   if (!logPanel || !logPanel.container?.active) return;
   const textObj = logPanel.textObj;
   if (!textObj || !textObj.active) return;
-  const maxVis = logPanel.maxLines || 12;
+  const maxVis = logPanel.maxLines || 32;
   const total = actionLog.length;
-  const maxOffset = Math.max(0, total - maxVis);
-  if (logPanel.scrollOffset == null) logPanel.scrollOffset = 0;
-  logPanel.scrollOffset = Math.min(Math.max(logPanel.scrollOffset, 0), maxOffset);
-  const start = Math.max(0, total - maxVis - logPanel.scrollOffset);
-  const end = start + maxVis;
-  const lines = actionLog.slice(start, end).map(e => `- ${e}`);
+  const start = Math.max(0, total - maxVis);
+  const lines = actionLog.slice(start).map(e => `- ${e}`);
   textObj.setText(lines.join("\n"));
-  const track = logPanel.scrollTrack;
-  const thumb = logPanel.scrollThumb;
-  if (track && thumb) {
-    const trackH = track.height || 0;
-    const trackY = track.y;
-    const thumbH = Math.max(16, maxVis / Math.max(1, total) * trackH);
-    thumb.height = thumbH;
-    const ratio = maxOffset > 0 ? logPanel.scrollOffset / maxOffset : 0;
-    thumb.y = trackY + (trackH - thumbH) * ratio;
-  }
 }
 
 function toggleSpionePanel(scene) {
@@ -2727,13 +2634,32 @@ async function windigoEffect(scene, giocatore, demone) {
 
 async function krampusEffect(scene, giocatore) {
   // Manda al cimitero un demone di livello *1 (in una cerchia) ed usa il suo effetto entrata
-  const candidate = (gioco?.giocatori || []).flatMap(p => p.cerchia || []).find(d => d instanceof Demone && (d.livello_stella || 0) === 1);
-  if (!candidate) return;
-  const owner = (gioco?.giocatori || []).find(p => (p.cerchia || []).includes(candidate));
-  if (owner) {
-    owner.cerchia.splice(owner.cerchia.indexOf(candidate), 1);
-    pushToCimitero(scene, candidate, giocatore);
-    await handleDemoneEntrata(scene, giocatore, candidate);
+  const pool = (gioco?.giocatori || []).flatMap(p =>
+    (p.cerchia || []).map(d => ({ p, d })).filter(o => (o.d?.livello_stella || 0) === 1)
+  ).filter(o => (o.d?.nome || "").toLowerCase() !== "babi"); // evita loop con Babi
+  if (!pool.length) return;
+  let choice = null;
+  if (giocatore.isBot) {
+    choice = pool.slice().sort((a, b) => {
+      const va = gioco._valuta_demone_necro ? gioco._valuta_demone_necro(a.d) : (a.d?.livello_stella || 0);
+      const vb = gioco._valuta_demone_necro ? gioco._valuta_demone_necro(b.d) : (b.d?.livello_stella || 0);
+      return vb - va;
+    })[0];
+  } else {
+    const sel = await openDemonChoiceDialog(scene, pool.map(o => ({ demone: o.d, owner: o.p, loc: "cerchia" })), "Krampus: scegli un demone di livello 1");
+    if (sel) {
+      choice = { d: sel.demone || sel, p: sel.owner || sel.p };
+    }
+  }
+  if (!choice) choice = pool[0];
+  const { p: owner, d } = choice;
+  if (!owner || !d) return;
+  const idx = owner.cerchia.indexOf(d);
+  if (idx >= 0) owner.cerchia.splice(idx, 1);
+  pushToCimitero(scene, d, owner);
+  pushLog(`${giocatore.nome} sacrifica ${d.nome} con Krampus`);
+  if ((d?.tipo_effetto || "").toLowerCase() === "entrata") {
+    await handleDemoneEntrata(scene, giocatore, d);
   }
   refreshUI(scene);
 }
@@ -2796,12 +2722,23 @@ async function lilithEffect(scene, giocatore) {
       }
     }
   }
-  const opponents = (gioco?.giocatori || []).filter(p => p !== giocatore);
-  const target = opponents.map(p => ({ p, d: (p.cerchia || []).slice().sort((a,b)=> (b.livello_stella||0)-(a.livello_stella||0))[0] || null }))
-    .find(o => o.d);
+  const opponents = (gioco?.giocatori || []).filter(p => p !== giocatore && (p.cerchia || []).length);
+  let target = null;
+  if (giocatore.isBot) {
+    const leader = opponents.slice().sort((a, b) => (b.totale_stelle || 0) - (a.totale_stelle || 0))[0];
+    if (leader) {
+      const dem = leader.cerchia.slice().sort((a, b) => (b.livello_stella || 0) - (a.livello_stella || 0))[0];
+      target = { p: leader, d: dem };
+    }
+  } else {
+    const pool = opponents.flatMap(p => (p.cerchia || []).map(d => ({ demone: d, owner: p, loc: "cerchia" })));
+    const choice = await openDemonChoiceDialog(scene, pool, "Lilith: scegli un demone da rubare");
+    if (choice) target = { p: choice.owner || choice.p, d: choice.demone || choice };
+  }
   if (target && target.d) {
     target.p.cerchia.splice(target.p.cerchia.indexOf(target.d), 1);
     giocatore.cerchia.push(target.d);
+    pushLog(`${giocatore.nome} ruba ${target.d.nome} con Lilith`);
     emitPassiveEvent(scene, "demone_rimosso", { giocatore: target.p, demone: target.d });
     emitPassiveEvent(scene, "demone_aggiunto_cerchia", { giocatore, demone: target.d });
     if (giocatore.isBot) {
@@ -2969,6 +2906,7 @@ async function asmodeoAction(scene, giocatore, demone) {
   if (myIdx >= 0) giocatore.cerchia.splice(myIdx, 1);
   if (oppIdx >= 0) target.p.cerchia.splice(oppIdx, 1);
   giocatore.cerchia.push(target.d);
+    pushLog(`${giocatore.nome} ruba ${target.d.nome} con Lilith`);
   target.p.cerchia.push(demone);
   asmodeoSwaps.push({ owner: giocatore, opponent: target.p, asmodeo: demone, target: target.d });
   if (!giocatore.isBot) {
@@ -3083,19 +3021,27 @@ async function orioneAction(scene, giocatore, demone) {
 
 async function tenguAction(scene, giocatore, demone) {
   const deck = gioco?.mazzo_evocazioni;
-  if (!deck) return false;
-  const same = [...deck.carte].reverse().find(d => d instanceof Demone && (d.livello_stella || 0) === (demone.livello_stella || 0) && d !== demone);
-  if (!same) return false;
+  if (!deck || !deck.carte?.length) return false;
+  const sameLevel = [...deck.carte].filter(d => d instanceof Demone && (d.livello_stella || 0) === (demone.livello_stella || 0) && d !== demone);
+  if (!sameLevel.length) return false;
+  let pick = null;
+  if (giocatore.isBot) {
+    pick = sameLevel[0];
+  } else {
+    pick = await openDemonChoiceDialog(scene, sameLevel.map(d => ({ demone: d, owner: null, loc: "mazzo" })), "Tengu: scegli il demone da prendere dal mazzo") || sameLevel[0];
+  }
+  const removeIdx = deck.carte.lastIndexOf(pick);
+  if (removeIdx < 0) return false;
   // remove Tengu from cerchia
   const idx = giocatore.cerchia.indexOf(demone);
   if (idx >= 0) giocatore.cerchia.splice(idx, 1);
   removeFromHumanCerchiaSprites(scene, demone);
-  // swap
-  deck.carte.splice(deck.carte.lastIndexOf(same), 1);
+  deck.carte.splice(removeIdx, 1);
   deck.inserisciInFondo(demone);
-  giocatore.cerchia.push(same);
-  addCerchiaSprite(scene, same, giocatore);
-  await handleDemoneEntrata(scene, giocatore, same);
+  giocatore.cerchia.push(pick);
+  addCerchiaSprite(scene, pick, giocatore);
+  pushLog(`${giocatore.nome} usa Tengu: prende ${pick.nome}`);
+  await handleDemoneEntrata(scene, giocatore, pick);
   refreshUI(scene);
   return true;
 }
@@ -5360,6 +5306,13 @@ function pushToCimitero(scene, demone, owner = null) {
     refreshUI(scene);
     return;
   }
+  // Raktabija: rimbalza in cerchia invece di restare nel cimitero
+  if (owner && (demone?.nome || "").toLowerCase().includes("raktabija")) {
+    owner.cerchia.push(demone);
+    if (owner.nome === "Player") addCerchiaSprite(scene, demone, owner);
+    refreshUI(scene);
+    return;
+  }
   gioco.cimitero.push(demone);
   updateCemeteryUI(scene);
 }
@@ -6429,6 +6382,28 @@ passiveEventBus.push(async (scene, type, payload) => {
     await maybeHandleSibilla(scene, payload.giocatore, payload.carta);
   }
 });
+passiveEventBus.push(async (scene, type, payload) => {
+  // Jalandhara: scarta 1 carta solo quando Jalandhara lascia la cerchia (va al cimitero)
+  if (type === "demone_rimosso") {
+    const { giocatore, demone } = payload || {};
+    if (!giocatore || !demone) return;
+    const isJalan = (demone?.nome || "").toLowerCase().includes("jalandhara");
+    if (!isJalan) return;
+    if (giocatore.isBot) {
+      const c = pickLowestEnergyOrAny(giocatore.mano);
+      if (c) {
+        const idx = giocatore.mano.indexOf(c);
+        if (idx >= 0) giocatore.mano.splice(idx, 1);
+        gioco.scartaCarteDi(giocatore, [c]);
+      }
+    } else {
+      await openHandDiscardDialog(scene, giocatore, 1, { title: "Jalandhara", info: "Scarta 1 carta" });
+    }
+    if (!giocatore.isBot) syncHumanHand(scene);
+    refreshUI(scene);
+  }
+});
+
 passiveEventBus.push(async (scene, type, payload) => {
   // Akerbeltz: ogni volta che il boss ruota nel tuo turno, pesca 1 carta
   if (type === "boss_ruotato") {
